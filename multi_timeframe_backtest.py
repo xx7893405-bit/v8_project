@@ -14,7 +14,7 @@ TIMEFRAME_FILES = {
 }
 
 # ---------------------------------------------------------------------------
-# V8 全知之眼 - 終極實盤對齊運算內核 (二次回踩防護對齊完美註解版 v9.8 - 右側追單爆發版)
+# V8 全知之眼 - 終極實盤對齊運算內核 (策略分流版 v9.9)
 # ---------------------------------------------------------------------------
 class V8_Omniscient_Eye:
     def __init__(self, df):
@@ -41,6 +41,16 @@ class V8_Omniscient_Eye:
         self.df['VWAP_1.0_SD_Lower'] = self.df['VWAP'] - rolling_std
         self.df['VWAP_2.0_SD_Upper'] = self.df['VWAP'] + (rolling_std * 2.0)
         self.df['VWAP_2.0_SD_Lower'] = self.df['VWAP'] - (rolling_std * 2.0)
+        self.df['VWAP_SD_MA'] = self.df['VWAP_SD'].rolling(32, min_periods=1).mean()
+        self.df['VWAP_SD_EXPANSION'] = self.df['VWAP_SD'] / self.df['VWAP_SD_MA']
+
+        prev_close = self.df['close'].shift(1)
+        true_range = pd.concat([
+            self.df['high'] - self.df['low'],
+            (self.df['high'] - prev_close).abs(),
+            (self.df['low'] - prev_close).abs(),
+        ], axis=1).max(axis=1)
+        self.df['ATR_14'] = true_range.rolling(14, min_periods=1).mean()
 
         self.df['MA5'] = self.df['close'].rolling(5).mean()
         self.df['MA10'] = self.df['close'].rolling(10).mean()
@@ -133,6 +143,14 @@ class MultiTimeframeBacktester:
     def _inject_bias(df):
         df["MA20"] = df["close"].rolling(20).mean()
         df["MA20_Ref"] = df["close"].shift(20)
+        prev_close = df["close"].shift(1)
+        true_range = pd.concat([
+            df["high"] - df["low"],
+            (df["high"] - prev_close).abs(),
+            (df["low"] - prev_close).abs(),
+        ], axis=1).max(axis=1)
+        df["ATR_14"] = true_range.rolling(14, min_periods=1).mean()
+        df["trend_strength"] = (df["close"] - df["MA20"]).abs() / df["ATR_14"]
         df["bias"] = np.where((df["close"] > df["MA20"]) & (df["close"] > df["MA20_Ref"]), "LONG",
                               np.where((df["close"] < df["MA20"]) & (df["close"] < df["MA20_Ref"]), "SHORT", "NONE"))
         return df
@@ -186,6 +204,7 @@ class MultiTimeframeBacktester:
             "be_active": active_pos.get("be_active", False),
             "tp1_hit": active_pos.get("tp1_hit", False),
             "entry_mode": active_pos.get("entry_mode", "UNKNOWN"),
+            "exit_model": active_pos.get("exit_model", "UNKNOWN"),
         }
 
     @staticmethod
@@ -201,7 +220,7 @@ class MultiTimeframeBacktester:
     @staticmethod
     def _json_ready(record):
         converted = record.copy()
-        for key in ("entry_time", "exit_time", "time"):
+        for key in ("entry_time", "exit_time", "time", "signal_time"):
             if key in converted:
                 converted[key] = str(converted[key])
         return converted
@@ -322,13 +341,13 @@ class MultiTimeframeBacktester:
         self.v8_15m = V8_Omniscient_Eye(self.df_15m)
         df_res = self.v8_15m.df
 
-        df_res["m15_fvg_type"] = df_15m_fvg["fvg_type"]
-        df_res["m15_fvg_top"] = df_15m_fvg["fvg_top"]
-        df_res["m15_fvg_bottom"] = df_15m_fvg["fvg_bottom"]
+        df_res["m15_fvg_type"] = df_15m_fvg["fvg_type"].shift(1)
+        df_res["m15_fvg_top"] = df_15m_fvg["fvg_top"].shift(1)
+        df_res["m15_fvg_bottom"] = df_15m_fvg["fvg_bottom"].shift(1)
 
         df_1d_aligned = self.df_1d[["bias"]].copy()
         df_1d_aligned.index = df_1d_aligned.index + pd.Timedelta(days=1)
-        df_4h_aligned = self.df_4h[["bias"]].copy()
+        df_4h_aligned = self.df_4h[["bias", "trend_strength"]].copy()
         df_4h_aligned.index = df_4h_aligned.index + pd.Timedelta(hours=4)
         df_1h_fvg_aligned = df_1h_fvg.copy()
         df_1h_fvg_aligned.index = df_1h_fvg_aligned.index + pd.Timedelta(hours=1)
@@ -336,6 +355,7 @@ class MultiTimeframeBacktester:
         print("正在執行多時區時間軸【嚴格實盤收盤對齊】...")
         df_res["bias_1d"] = df_1d_aligned["bias"].reindex(df_res.index, method="ffill")
         df_res["bias_4h"] = df_4h_aligned["bias"].reindex(df_res.index, method="ffill")
+        df_res["trend_strength_4h"] = df_4h_aligned["trend_strength"].reindex(df_res.index, method="ffill")
 
         df_res["h1_fvg_type"] = df_1h_fvg_aligned["fvg_type"].reindex(df_res.index, method="ffill")
         df_res["h1_fvg_top"] = df_1h_fvg_aligned["fvg_top"].reindex(df_res.index, method="ffill")
@@ -390,7 +410,21 @@ class MultiTimeframeBacktester:
         return 'NONE'
 
     def run_backtest(self, mode="NONE", enable_be=False, tp1_close_pct=0.0, be_trigger_ratio=1.5,
-                     enable_breakout_entry=True, breakout_min_rr=1.3):
+                     enable_breakout_entry=True, breakout_min_rr=1.3, entry_policy="hybrid",
+                     use_vwap_direction_filter=True, exit_model="vwap",
+                     atr_buffer_mult=0.5, fixed_rr=1.8,
+                     regime_trend_min=1.0, regime_vwap_expansion_min=1.0,
+                     regime_fallback="structure_atr"):
+        if entry_policy not in {"hybrid", "breakout_only", "retrace_only"}:
+            raise ValueError("entry_policy must be one of: hybrid, breakout_only, retrace_only")
+        if exit_model not in {"vwap", "structure_atr", "regime"}:
+            raise ValueError("exit_model must be one of: vwap, structure_atr, regime")
+        if regime_fallback not in {"structure_atr", "skip"}:
+            raise ValueError("regime_fallback must be one of: structure_atr, skip")
+
+        allow_retrace_entry = entry_policy in {"hybrid", "retrace_only"}
+        allow_breakout_entry = enable_breakout_entry and entry_policy in {"hybrid", "breakout_only"}
+
         balance = self.initial_balance
         trades = []
         missed_trades_list = []
@@ -399,6 +433,7 @@ class MultiTimeframeBacktester:
         n_rows = len(df)
         active_position = None
         pending_retest_order = None
+        pending_breakout_order = None
 
         lookback = 96
 
@@ -407,6 +442,82 @@ class MultiTimeframeBacktester:
             curr = df.iloc[i]
             curr_time = df.index[i]
             prev_time = df.index[i-1]
+
+            if active_position is None and pending_breakout_order is not None and i > pending_breakout_order["created_idx"]:
+                order_type = pending_breakout_order["type"]
+
+                if order_type == "LONG":
+                    market_entry_p = curr["open"] + self.slippage_usd
+                    if pending_breakout_order["exit_model"] == "skip":
+                        pending_breakout_order = None
+                        continue
+                    if pending_breakout_order["exit_model"] == "vwap":
+                        vwap_sd_padding = pending_breakout_order["vwap_sd_padding"]
+                        sl = round(market_entry_p - (vwap_sd_padding * self.sl_sd_mult), 2)
+                        tp1 = pending_breakout_order["tp1"]
+                        tp2 = pending_breakout_order["tp2"]
+                    else:
+                        atr_buffer = pending_breakout_order["atr"] * atr_buffer_mult
+                        sl = round(pending_breakout_order["structure_sl"] - atr_buffer, 2)
+                        raw_risk = market_entry_p - sl
+                        tp1 = round(market_entry_p + raw_risk, 2)
+                        tp2 = round(market_entry_p + raw_risk * fixed_rr, 2)
+                    expected_fee_drag = (market_entry_p * self.taker_fee) + (sl * self.taker_fee)
+                    net_sl_dist = (market_entry_p - sl) + expected_fee_drag
+                    is_valid_target = tp2 > market_entry_p
+                    math_rr = ((tp1 - market_entry_p) * tp1_close_pct + (tp2 - market_entry_p) * (1.0 - tp1_close_pct)) / net_sl_dist if net_sl_dist > 0 else 0.0
+                else:
+                    market_entry_p = curr["open"] - self.slippage_usd
+                    if pending_breakout_order["exit_model"] == "skip":
+                        pending_breakout_order = None
+                        continue
+                    if pending_breakout_order["exit_model"] == "vwap":
+                        vwap_sd_padding = pending_breakout_order["vwap_sd_padding"]
+                        sl = round(market_entry_p + (vwap_sd_padding * self.sl_sd_mult), 2)
+                        tp1 = pending_breakout_order["tp1"]
+                        tp2 = pending_breakout_order["tp2"]
+                    else:
+                        atr_buffer = pending_breakout_order["atr"] * atr_buffer_mult
+                        sl = round(pending_breakout_order["structure_sl"] + atr_buffer, 2)
+                        raw_risk = sl - market_entry_p
+                        tp1 = round(market_entry_p - raw_risk, 2)
+                        tp2 = round(market_entry_p - raw_risk * fixed_rr, 2)
+                    expected_fee_drag = (market_entry_p * self.taker_fee) + (sl * self.taker_fee)
+                    net_sl_dist = (sl - market_entry_p) + expected_fee_drag
+                    is_valid_target = market_entry_p > tp2
+                    math_rr = ((market_entry_p - tp1) * tp1_close_pct + (market_entry_p - tp2) * (1.0 - tp1_close_pct)) / net_sl_dist if net_sl_dist > 0 else 0.0
+
+                if net_sl_dist > 0 and is_valid_target and math_rr >= breakout_min_rr:
+                    initial_risk_usd = balance * self.risk_pct
+                    size = min(initial_risk_usd / net_sl_dist, pending_breakout_order["volume_cap"])
+                    active_position = {
+                        "type": order_type, "entry_idx": i, "entry_time": curr_time, "entry_price": market_entry_p,
+                        "sl": sl, "tp1": tp1, "tp2": tp2, "size": size, "entry_balance": balance,
+                        "rr_potential": math_rr, "actual_risk_usd": size * net_sl_dist,
+                        "tp1_hit": False, "be_active": False, "accumulated_funding": 0.0,
+                        "tp1_close_pct": tp1_close_pct, "remaining_size": size,
+                        "realized_pnl": 0.0, "realized_fee": 0.0, "tp1_realized": False,
+                        "entry_mode": "BREAKOUT",
+                        "exit_model": pending_breakout_order["exit_model"],
+                    }
+                    balance -= (size * market_entry_p) * self.taker_fee
+                else:
+                    missed_trades_list.append(
+                        self._record_missed(
+                            order_type,
+                            curr_time,
+                            "BREAKOUT_RR_FILTERED",
+                            signal_time=pending_breakout_order["signal_time"],
+                            entry_price=market_entry_p,
+                            sl=sl,
+                            tp1=tp1,
+                            tp2=tp2,
+                            rr=math_rr,
+                            exit_model=pending_breakout_order["exit_model"],
+                        )
+                    )
+
+                pending_breakout_order = None
 
             # 1. 持倉常規管理
             if active_position is not None:
@@ -594,7 +705,7 @@ class MultiTimeframeBacktester:
                             pending_retest_order = None
 
             # 3. 策略初次回踩雷達觸發 (Radar Trigger)
-            if active_position is None and pending_retest_order is None:
+            if active_position is None and pending_retest_order is None and pending_breakout_order is None:
                 bias_1d = prev["bias_1d"]
                 bias_4h = prev["bias_4h"]
                 fvg_overlap_long = prev["is_fvg_overlap_long"]
@@ -604,7 +715,16 @@ class MultiTimeframeBacktester:
                 short_overlap_top = prev["short_overlap_top"]
                 short_overlap_bottom = prev["short_overlap_bottom"]
 
-                if pd.isna(prev["VWAP_SD"]): continue
+                if exit_model in {"vwap", "regime"} and pd.isna(prev["VWAP_SD"]): continue
+                if exit_model in {"structure_atr", "regime"} and pd.isna(prev["ATR_14"]): continue
+                use_regime_vwap = (
+                    exit_model == "regime"
+                    and pd.notna(prev["trend_strength_4h"])
+                    and pd.notna(prev["VWAP_SD_EXPANSION"])
+                    and prev["trend_strength_4h"] >= regime_trend_min
+                    and prev["VWAP_SD_EXPANSION"] >= regime_vwap_expansion_min
+                )
+                selected_exit_model = "vwap" if use_regime_vwap else (regime_fallback if exit_model == "regime" else exit_model)
 
                 allowed_long, allowed_short = True, True
                 if mode == "4H":
@@ -615,13 +735,14 @@ class MultiTimeframeBacktester:
                     if bias_4h != "SHORT" or bias_1d != "SHORT": allowed_short = False
 
                 if allowed_long and fvg_overlap_long and pd.notna(long_overlap_top) and pd.notna(long_overlap_bottom):
-                    if (prev["close"] > prev["VWAP"]) and (prev["local_bias"] == "LONG"):
+                    vwap_long_ok = (not use_vwap_direction_filter) or (prev["close"] > prev["VWAP"])
+                    if vwap_long_ok and (prev["local_bias"] == "LONG"):
                         overlap_height = long_overlap_top - long_overlap_bottom
                         limit_p = long_overlap_top - (overlap_height * self.entry_buffer_pct)
-                        vwap_sd_padding = max(prev["VWAP_SD"], 80.0)
+                        vwap_sd_padding = max(prev["VWAP_SD"], 80.0) if pd.notna(prev["VWAP_SD"]) else 80.0
 
                         # 狀況 A：傳統左側限價回踩吃單
-                        if curr["low"] <= limit_p:
+                        if allow_retrace_entry and curr["low"] <= limit_p:
                             entry_price = limit_p
                             sl = round(entry_price - (vwap_sd_padding * self.sl_sd_mult), 2)
                             tp1 = round(prev["VWAP_1.0_SD_Upper"], 2)
@@ -660,48 +781,21 @@ class MultiTimeframeBacktester:
                                     )
 
                         # 🔧 修正點 2：狀況 B - 右側強勢突破直接追單機制
-                        elif enable_breakout_entry and (curr["close"] > prev["high"]):
-                            market_entry_p = curr["close"] + self.slippage_usd
-                            sl = round(market_entry_p - (vwap_sd_padding * self.sl_sd_mult), 2)
-                            tp1 = round(prev["VWAP_1.0_SD_Upper"], 2)
-                            tp2 = round(prev["VWAP_2.0_SD_Upper"] + vwap_sd_padding * self.tp2_extension_sd_mult, 2)
+                        elif allow_breakout_entry and (curr["close"] > prev["high"]):
+                            pending_breakout_order = {
+                                "type": "LONG",
+                                "created_idx": i,
+                                "signal_time": curr_time,
+                                "exit_model": selected_exit_model,
+                                "vwap_sd_padding": vwap_sd_padding,
+                                "tp1": round(prev["VWAP_1.0_SD_Upper"], 2),
+                                "tp2": round(prev["VWAP_2.0_SD_Upper"] + vwap_sd_padding * self.tp2_extension_sd_mult, 2),
+                                "structure_sl": long_overlap_bottom,
+                                "atr": prev["ATR_14"],
+                                "volume_cap": curr["volume"] * self.max_vol_pct,
+                            }
 
-                            expected_fee_drag = (market_entry_p * self.taker_fee) + (sl * self.taker_fee)
-                            net_sl_dist = (market_entry_p - sl) + expected_fee_drag
-
-                            if net_sl_dist > 0 and tp2 > market_entry_p:
-                                math_rr = ((tp1 - market_entry_p) * tp1_close_pct + (tp2 - market_entry_p) * (1.0 - tp1_close_pct)) / net_sl_dist
-                                # 檢查是否滿足右側追單最低盈虧比門檻
-                                if math_rr >= breakout_min_rr:
-                                    initial_risk_usd = balance * self.risk_pct
-                                    size = min(initial_risk_usd / net_sl_dist, prev["volume"] * self.max_vol_pct)
-
-                                    # 右側直接市價成交入局
-                                    active_position = {
-                                        "type": "LONG", "entry_idx": i, "entry_time": curr_time, "entry_price": market_entry_p,
-                                        "sl": sl, "tp1": tp1, "tp2": tp2, "size": size, "entry_balance": balance,
-                                        "rr_potential": math_rr, "actual_risk_usd": size * net_sl_dist,
-                                        "tp1_hit": False, "be_active": False, "accumulated_funding": 0.0,
-                                        "tp1_close_pct": tp1_close_pct, "remaining_size": size,
-                                        "realized_pnl": 0.0, "realized_fee": 0.0, "tp1_realized": False,
-                                        "entry_mode": "BREAKOUT",
-                                    }
-                                    balance -= (size * market_entry_p) * self.taker_fee
-                                else:
-                                    missed_trades_list.append(
-                                        self._record_missed(
-                                            "LONG",
-                                            curr_time,
-                                            "BREAKOUT_RR_FILTERED",
-                                            entry_price=market_entry_p,
-                                            sl=sl,
-                                            tp1=tp1,
-                                            tp2=tp2,
-                                            rr=math_rr,
-                                        )
-                                    )
-
-                        elif curr["high"] >= round(prev["VWAP_1.0_SD_Upper"], 2):
+                        elif allow_retrace_entry and curr["high"] >= round(prev["VWAP_1.0_SD_Upper"], 2):
                             missed_trades_list.append(
                                 self._record_missed(
                                     "LONG",
@@ -714,13 +808,14 @@ class MultiTimeframeBacktester:
                             )
 
                 elif allowed_short and fvg_overlap_short and pd.notna(short_overlap_bottom) and pd.notna(short_overlap_top):
-                    if (prev["close"] < prev["VWAP"]) and (prev["local_bias"] == "SHORT"):
+                    vwap_short_ok = (not use_vwap_direction_filter) or (prev["close"] < prev["VWAP"])
+                    if vwap_short_ok and (prev["local_bias"] == "SHORT"):
                         overlap_height = short_overlap_top - short_overlap_bottom
                         limit_p = short_overlap_bottom + (overlap_height * self.entry_buffer_pct)
-                        vwap_sd_padding = max(prev["VWAP_SD"], 80.0)
+                        vwap_sd_padding = max(prev["VWAP_SD"], 80.0) if pd.notna(prev["VWAP_SD"]) else 80.0
 
                         # 狀況 A：傳統左側限價回踩吃單
-                        if curr["high"] >= limit_p:
+                        if allow_retrace_entry and curr["high"] >= limit_p:
                             entry_price = limit_p
                             sl = round(entry_price + (vwap_sd_padding * self.sl_sd_mult), 2)
                             tp1 = round(prev["VWAP_1.0_SD_Lower"], 2)
@@ -759,45 +854,21 @@ class MultiTimeframeBacktester:
                                     )
 
                         # 🔧 修正點 3：SHORT 右側跌破追單機制
-                        elif enable_breakout_entry and (curr["close"] < prev["low"]):
-                            market_entry_p = curr["close"] - self.slippage_usd
-                            sl = round(market_entry_p + (vwap_sd_padding * self.sl_sd_mult), 2)
-                            tp1 = round(prev["VWAP_1.0_SD_Lower"], 2)
-                            tp2 = round(prev["VWAP_2.0_SD_Lower"] - vwap_sd_padding * self.tp2_extension_sd_mult, 2)
+                        elif allow_breakout_entry and (curr["close"] < prev["low"]):
+                            pending_breakout_order = {
+                                "type": "SHORT",
+                                "created_idx": i,
+                                "signal_time": curr_time,
+                                "exit_model": selected_exit_model,
+                                "vwap_sd_padding": vwap_sd_padding,
+                                "tp1": round(prev["VWAP_1.0_SD_Lower"], 2),
+                                "tp2": round(prev["VWAP_2.0_SD_Lower"] - vwap_sd_padding * self.tp2_extension_sd_mult, 2),
+                                "structure_sl": short_overlap_top,
+                                "atr": prev["ATR_14"],
+                                "volume_cap": curr["volume"] * self.max_vol_pct,
+                            }
 
-                            expected_fee_drag = (market_entry_p * self.taker_fee) + (sl * self.taker_fee)
-                            net_sl_dist = (sl - market_entry_p) + expected_fee_drag
-
-                            if net_sl_dist > 0 and market_entry_p > tp2:
-                                math_rr = ((market_entry_p - tp1) * tp1_close_pct + (market_entry_p - tp2) * (1.0 - tp1_close_pct)) / net_sl_dist
-                                if math_rr >= breakout_min_rr:
-                                    initial_risk_usd = balance * self.risk_pct
-                                    size = min(initial_risk_usd / net_sl_dist, prev["volume"] * self.max_vol_pct)
-                                    active_position = {
-                                        "type": "SHORT", "entry_idx": i, "entry_time": curr_time, "entry_price": market_entry_p,
-                                        "sl": sl, "tp1": tp1, "tp2": tp2, "size": size, "entry_balance": balance,
-                                        "rr_potential": math_rr, "actual_risk_usd": size * net_sl_dist,
-                                        "tp1_hit": False, "be_active": False, "accumulated_funding": 0.0,
-                                        "tp1_close_pct": tp1_close_pct, "remaining_size": size,
-                                        "realized_pnl": 0.0, "realized_fee": 0.0, "tp1_realized": False,
-                                        "entry_mode": "BREAKOUT",
-                                    }
-                                    balance -= (size * market_entry_p) * self.taker_fee
-                                else:
-                                    missed_trades_list.append(
-                                        self._record_missed(
-                                            "SHORT",
-                                            curr_time,
-                                            "BREAKOUT_RR_FILTERED",
-                                            entry_price=market_entry_p,
-                                            sl=sl,
-                                            tp1=tp1,
-                                            tp2=tp2,
-                                            rr=math_rr,
-                                        )
-                                    )
-
-                        elif curr["low"] <= round(prev["VWAP_1.0_SD_Lower"], 2):
+                        elif allow_retrace_entry and curr["low"] <= round(prev["VWAP_1.0_SD_Lower"], 2):
                             missed_trades_list.append(
                                 self._record_missed(
                                     "SHORT",
@@ -863,7 +934,7 @@ class MultiTimeframeBacktester:
             return text + ' ' * actual_pad
 
         print("\n" + "="*125)
-        print(f" V8 Omniscient Eye Report (二次回踩防護對齊版 v9.8) - {strategy_name}")
+        print(f" V8 Omniscient Eye Report (策略分流版 v9.9) - {strategy_name}")
         print("="*125)
         header = f"{pad_cjk('PERIOD', 12)} | {'TRADES':<6} | {'P_RR':<8} | {'RE_RR':<8} | {'E_R':<6} | {'WIN%':<8} | {'TP2':<5} | {'BE':<5} | {'TS':<5} | {'SL':<5} | {'PROFIT':<9} | {'MISSED':<6} | {'M_RATE':<6}"
         print(header)
@@ -885,13 +956,13 @@ if __name__ == "__main__":
             initial_balance=10000.0,
             risk_pct=0.01,
             slippage_usd=15.0,
-            entry_buffer_pct=0.50, # 放寬回踩深度門檻（20% 即觸發）
+            entry_buffer_pct=0.50, # 只影響 retrace/hybrid；0.50 = FVG 重疊區中線
             maker_fee=0.0002,
             taker_fee=0.0005,
             max_vol_pct=0.05,
             funding_rate_8h=0.0001,
             max_holding_bars=96,
-            min_net_profit_r=2.2, # 調降左側入場的基本盈虧比標準
+            min_net_profit_r=2.2, # 只影響 retrace/hybrid 的左側回踩 RR 門檻
             sl_sd_mult=1.4,
             tp2_extension_sd_mult=1.6,
         )
@@ -900,17 +971,18 @@ if __name__ == "__main__":
         cfg_tp1_pct = 0.0
         cfg_be_trigger = 2.5
 
-        # 🔧 參數設定注入點：開啟右側突破追單，並給予 1.3 的彈性盈虧比限制
+        # 先獨立測試目前有正貢獻的右側突破追單，避免回踩參數污染結果。
         trades_a, missed_a = backtester.run_backtest(
             mode="4H",
             enable_be=cfg_be,
             tp1_close_pct=cfg_tp1_pct,
             be_trigger_ratio=cfg_be_trigger,
             enable_breakout_entry=True,  # 🔴 是否開啟突破追單
-            breakout_min_rr=1.3          # 🔴 突破追單的最低盈虧比審查
+            breakout_min_rr=1.3,         # 🔴 突破追單的最低盈虧比審查
+            entry_policy="breakout_only",
         )
-        backtester.generate_and_print_report("15m+1H+4H 右側雙追單爆發版 v9.8", trades_a, missed_a)
-        backtester.save_results_to_files(trades_a, missed_a, "v8_backtest_report_4H")
+        backtester.generate_and_print_report("15m+1H+4H 右側突破獨立版 v9.9", trades_a, missed_a)
+        backtester.save_results_to_files(trades_a, missed_a, "v8_backtest_report_4H_breakout_only")
 
     except FileNotFoundError as e:
         print(f"❌ 錯誤: {e}")
