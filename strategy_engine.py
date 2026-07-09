@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
@@ -9,6 +10,16 @@ import pandas as pd
 
 from backtest_config import BacktestConfig, M1_COLUMNS, RunConfig, StrategyConfig
 from market_data import CSVMarketDataFeed, MarketDataFeed
+
+
+@dataclass
+class BacktestSessionResult:
+    trades: List[dict]
+    missed_trades: List[dict]
+    balance: float
+    active_position: Optional[dict]
+    pending_retest_order: Optional[dict]
+    pending_breakout_order: Optional[dict]
 
 
 class V8OmniscientEye:
@@ -402,10 +413,12 @@ class MultiTimeframeBacktester:
             raise ValueError("exit_model must be one of: vwap, structure_atr, regime")
         if cfg.regime_fallback not in {"structure_atr", "skip"}:
             raise ValueError("regime_fallback must be one of: structure_atr, skip")
+        if not cfg.allow_long_entries and not cfg.allow_short_entries:
+            raise ValueError("At least one of allow_long_entries or allow_short_entries must be True")
 
     @staticmethod
-    def _allow_directions(mode: str, bias_1d: str, bias_4h: str) -> Tuple[bool, bool]:
-        allowed_long, allowed_short = True, True
+    def _allow_directions(mode: str, bias_1d: str, bias_4h: str, allow_long_entries: bool, allow_short_entries: bool) -> Tuple[bool, bool]:
+        allowed_long, allowed_short = allow_long_entries, allow_short_entries
         if mode == "4H":
             if bias_4h != "LONG":
                 allowed_long = False
@@ -436,6 +449,24 @@ class MultiTimeframeBacktester:
         if cfg.exit_model == "regime":
             return cfg.regime_fallback
         return cfg.exit_model
+
+    @staticmethod
+    def _dynamic_tp2_extension_sd_mult(prev: pd.Series) -> float:
+        trend_strength = float(prev["trend_strength_4h"]) if pd.notna(prev["trend_strength_4h"]) else 1.0
+        vwap_expansion = float(prev["VWAP_SD_EXPANSION"]) if pd.notna(prev["VWAP_SD_EXPANSION"]) else 1.0
+
+        trend_component = max(0.0, trend_strength - 1.0) * 0.35
+        expansion_component = max(0.0, vwap_expansion - 1.0) * 0.45
+        dynamic_mult = 0.9 + trend_component + expansion_component
+        return min(2.4, max(0.8, dynamic_mult))
+
+    @staticmethod
+    def _breakout_min_rr_for_side(cfg: RunConfig, side: str) -> float:
+        if side == "LONG" and cfg.breakout_min_rr_long is not None:
+            return cfg.breakout_min_rr_long
+        if side == "SHORT" and cfg.breakout_min_rr_short is not None:
+            return cfg.breakout_min_rr_short
+        return cfg.breakout_min_rr
 
     def _build_breakout_position(self, order: dict, curr: pd.Series, curr_time: pd.Timestamp, balance: float, cfg: RunConfig) -> Tuple[Optional[dict], Optional[dict]]:
         order_type = order["type"]
@@ -479,7 +510,8 @@ class MultiTimeframeBacktester:
             is_valid_target = market_entry_p > tp2
             math_rr = ((market_entry_p - tp1) * cfg.tp1_close_pct + (market_entry_p - tp2) * (1.0 - cfg.tp1_close_pct)) / net_sl_dist if net_sl_dist > 0 else 0.0
 
-        if net_sl_dist > 0 and is_valid_target and math_rr >= cfg.breakout_min_rr:
+        min_rr = self._breakout_min_rr_for_side(cfg, order_type)
+        if net_sl_dist > 0 and is_valid_target and math_rr >= min_rr:
             initial_risk_usd = balance * self.config.risk_pct
             size = min(initial_risk_usd / net_sl_dist, order["volume_cap"])
             return {
@@ -516,6 +548,7 @@ class MultiTimeframeBacktester:
             tp1=tp1,
             tp2=tp2,
             rr=math_rr,
+            min_rr=min_rr,
             exit_model=order["exit_model"],
         )
         return None, missed
@@ -822,7 +855,13 @@ class MultiTimeframeBacktester:
         if selected_exit_model is None:
             return None, None, missed
 
-        allowed_long, allowed_short = self._allow_directions(cfg.mode, prev["bias_1d"], prev["bias_4h"])
+        allowed_long, allowed_short = self._allow_directions(
+            cfg.mode,
+            prev["bias_1d"],
+            prev["bias_4h"],
+            cfg.allow_long_entries,
+            cfg.allow_short_entries,
+        )
         allow_retrace_entry = cfg.entry_policy in {"hybrid", "retrace_only"}
         allow_breakout_entry = cfg.enable_breakout_entry and cfg.entry_policy in {"hybrid", "breakout_only"}
 
@@ -832,12 +871,13 @@ class MultiTimeframeBacktester:
                 overlap_height = prev["long_overlap_top"] - prev["long_overlap_bottom"]
                 limit_p = prev["long_overlap_top"] - (overlap_height * self.config.entry_buffer_pct)
                 vwap_sd_padding = max(prev["VWAP_SD"], 80.0) if pd.notna(prev["VWAP_SD"]) else 80.0
+                tp2_extension_sd_mult = self._dynamic_tp2_extension_sd_mult(prev)
 
                 if allow_retrace_entry:
                     entry_price = limit_p
                     sl = round(entry_price - (vwap_sd_padding * self.config.sl_sd_mult), 2)
                     tp1 = round(prev["VWAP_1.0_SD_Upper"], 2)
-                    tp2 = round(prev["VWAP_2.0_SD_Upper"] + vwap_sd_padding * self.config.tp2_extension_sd_mult, 2)
+                    tp2 = round(prev["VWAP_2.0_SD_Upper"] + vwap_sd_padding * tp2_extension_sd_mult, 2)
                     expected_fee_drag = (entry_price * self.config.maker_fee) + (sl * self.config.taker_fee)
                     net_sl_dist = (entry_price - sl) + expected_fee_drag
                     order, miss = self._build_retrace_order("LONG", prev, curr_time, balance, cfg.tp1_close_pct, entry_price, sl, tp1, tp2, net_sl_dist)
@@ -855,7 +895,7 @@ class MultiTimeframeBacktester:
                         "exit_model": selected_exit_model,
                         "vwap_sd_padding": vwap_sd_padding,
                         "tp1": round(prev["VWAP_1.0_SD_Upper"], 2),
-                        "tp2": round(prev["VWAP_2.0_SD_Upper"] + vwap_sd_padding * self.config.tp2_extension_sd_mult, 2),
+                        "tp2": round(prev["VWAP_2.0_SD_Upper"] + vwap_sd_padding * tp2_extension_sd_mult, 2),
                         "structure_sl": prev["long_overlap_bottom"],
                         "atr": prev["ATR_14"],
                         "volume_cap": curr["volume"] * self.config.max_vol_pct,
@@ -867,12 +907,13 @@ class MultiTimeframeBacktester:
                 overlap_height = prev["short_overlap_top"] - prev["short_overlap_bottom"]
                 limit_p = prev["short_overlap_bottom"] + (overlap_height * self.config.entry_buffer_pct)
                 vwap_sd_padding = max(prev["VWAP_SD"], 80.0) if pd.notna(prev["VWAP_SD"]) else 80.0
+                tp2_extension_sd_mult = self._dynamic_tp2_extension_sd_mult(prev)
 
                 if allow_retrace_entry:
                     entry_price = limit_p
                     sl = round(entry_price + (vwap_sd_padding * self.config.sl_sd_mult), 2)
                     tp1 = round(prev["VWAP_1.0_SD_Lower"], 2)
-                    tp2 = round(prev["VWAP_2.0_SD_Lower"] - vwap_sd_padding * self.config.tp2_extension_sd_mult, 2)
+                    tp2 = round(prev["VWAP_2.0_SD_Lower"] - vwap_sd_padding * tp2_extension_sd_mult, 2)
                     expected_fee_drag = (entry_price * self.config.maker_fee) + (sl * self.config.taker_fee)
                     net_sl_dist = (sl - entry_price) + expected_fee_drag
                     order, miss = self._build_retrace_order("SHORT", prev, curr_time, balance, cfg.tp1_close_pct, entry_price, sl, tp1, tp2, net_sl_dist)
@@ -890,7 +931,7 @@ class MultiTimeframeBacktester:
                         "exit_model": selected_exit_model,
                         "vwap_sd_padding": vwap_sd_padding,
                         "tp1": round(prev["VWAP_1.0_SD_Lower"], 2),
-                        "tp2": round(prev["VWAP_2.0_SD_Lower"] - vwap_sd_padding * self.config.tp2_extension_sd_mult, 2),
+                        "tp2": round(prev["VWAP_2.0_SD_Lower"] - vwap_sd_padding * tp2_extension_sd_mult, 2),
                         "structure_sl": prev["short_overlap_top"],
                         "atr": prev["ATR_14"],
                         "volume_cap": curr["volume"] * self.config.max_vol_pct,
@@ -898,7 +939,7 @@ class MultiTimeframeBacktester:
 
         return None, None, missed
 
-    def run_backtest(self, **kwargs: object) -> Tuple[List[dict], List[dict]]:
+    def run_session(self, force_close_at_end: bool = True, **kwargs: object) -> BacktestSessionResult:
         cfg = RunConfig(**kwargs)
         self._validate_run_config(cfg)
 
@@ -951,13 +992,45 @@ class MultiTimeframeBacktester:
                     breakout_order["created_idx"] = i
                     pending_breakout_order = breakout_order
 
-        if active_position is not None:
+        if force_close_at_end and active_position is not None:
             last_bar = df.iloc[-1]
             net_pnl, balance_delta, fee = self._calculate_market_exit(active_position, last_bar["close"], self.config.taker_fee)
             balance += balance_delta
             trades.append(self._record_trade(active_position, df.index[-1], net_pnl, "FORCE_CLOSE", exit_price=last_bar["close"], fee=fee))
+            active_position = None
 
-        return trades, missed_trades
+        return BacktestSessionResult(
+            trades=trades,
+            missed_trades=missed_trades,
+            balance=balance,
+            active_position=active_position,
+            pending_retest_order=pending_retest_order,
+            pending_breakout_order=pending_breakout_order,
+        )
+
+    def run_backtest(self, **kwargs: object) -> Tuple[List[dict], List[dict]]:
+        session = self.run_session(force_close_at_end=True, **kwargs)
+        return session.trades, session.missed_trades
+
+    def build_runtime_snapshot(self, strategy: StrategyConfig) -> dict:
+        self.config = strategy.to_backtest_config()
+        session = self.run_session(force_close_at_end=False, **strategy.to_run_config().__dict__)
+        latest_time = None
+        if not self.df_15m_indicators.empty:
+            latest_time = self.df_15m_indicators.index[-1]
+        latest_trade = session.trades[-1] if session.trades else None
+        latest_missed = session.missed_trades[-1] if session.missed_trades else None
+        return {
+            "as_of": str(latest_time) if latest_time is not None else None,
+            "balance": session.balance,
+            "active_position": self._json_ready(session.active_position) if session.active_position is not None else None,
+            "pending_retest_order": self._json_ready(session.pending_retest_order) if session.pending_retest_order is not None else None,
+            "pending_breakout_order": self._json_ready(session.pending_breakout_order) if session.pending_breakout_order is not None else None,
+            "latest_trade": self._json_ready(latest_trade) if latest_trade is not None else None,
+            "latest_missed": self._json_ready(latest_missed) if latest_missed is not None else None,
+            "trade_count": len(session.trades),
+            "missed_count": len(session.missed_trades),
+        }
 
     def analyze_results(self, trades: Sequence[dict]) -> dict:
         total_trades = len(trades)
@@ -982,6 +1055,28 @@ class MultiTimeframeBacktester:
             "avg_potential_rr": avg_potential_rr,
             "avg_realized_rr": avg_win_r / avg_loss_r if avg_loss_r > 0 else 0.0,
             "avg_trade_r": df_trades["rr_realized"].mean(),
+        }
+
+    def _build_direction_report_row(self, label: str, trades: Sequence[dict], missed_count: int) -> dict:
+        res = self.analyze_results(trades)
+        direction_pnl = sum(float(trade["pnl"]) for trade in trades)
+        direction_profit_pct = (direction_pnl / self.initial_balance) * 100 if self.initial_balance != 0 else 0.0
+        total_events = res["trades"] + missed_count
+        miss_rate = (missed_count / total_events) * 100 if total_events > 0 else 0.0
+        return {
+            "SIDE": label,
+            "TRADES": int(res["trades"]),
+            "P_RR": f"1:{res['avg_potential_rr']:.2f}",
+            "R_RR": f"1:{res['avg_realized_rr']:.2f}",
+            "E_R": f"{res['avg_trade_r']:+.2f}",
+            "WIN%": f"{res['win_rate']:.2f}%",
+            "TP2": int(res["tp_all"]),
+            "BE": int(res["be"]),
+            "TS": int(res["time_stop"]),
+            "SL": int(res["sl"]),
+            "PROFIT": f"{direction_profit_pct:+.2f}%",
+            "MISSED": missed_count,
+            "M_RATE": f"{miss_rate:.1f}%",
         }
 
     def generate_and_print_report(self, strategy_name: str, trades: Sequence[dict], missed_list: Sequence[dict]) -> None:
@@ -1028,6 +1123,25 @@ class MultiTimeframeBacktester:
         for r in reports:
             print(f"{pad_cjk(r['PERIOD'], 12)} | {r['TRADES']:<6} | {r['P_RR']:<8} | {r['R_RR']:<8} | {r['E_R']:<6} | {r['WIN%']:<8} | {r['TP2']:<5} | {r['BE']:<5} | {r['TS']:<5} | {r['SL']:<5} | {r['PROFIT']:<9} | {r['MISSED']:<6} | {r['M_RATE']:<6}")
         print("=" * 125 + "\n")
+
+        long_trades = df_trades[df_trades["type"] == "LONG"].to_dict("records") if not df_trades.empty and "type" in df_trades.columns else []
+        short_trades = df_trades[df_trades["type"] == "SHORT"].to_dict("records") if not df_trades.empty and "type" in df_trades.columns else []
+        long_missed = int((df_missed["type"] == "LONG").sum()) if not df_missed.empty and "type" in df_missed.columns else 0
+        short_missed = int((df_missed["type"] == "SHORT").sum()) if not df_missed.empty and "type" in df_missed.columns else 0
+
+        direction_reports = [
+            self._build_direction_report_row("LONG", long_trades, long_missed),
+            self._build_direction_report_row("SHORT", short_trades, short_missed),
+        ]
+
+        print("Direction Breakdown:")
+        print("-" * 125)
+        print(f"{'SIDE':<12} | {'TRADES':<6} | {'P_RR':<8} | {'RE_RR':<8} | {'E_R':<6} | {'WIN%':<8} | {'TP2':<5} | {'BE':<5} | {'TS':<5} | {'SL':<5} | {'PROFIT':<9} | {'MISSED':<6} | {'M_RATE':<6}")
+        print("-" * 125)
+        for r in direction_reports:
+            print(f"{r['SIDE']:<12} | {r['TRADES']:<6} | {r['P_RR']:<8} | {r['R_RR']:<8} | {r['E_R']:<6} | {r['WIN%']:<8} | {r['TP2']:<5} | {r['BE']:<5} | {r['TS']:<5} | {r['SL']:<5} | {r['PROFIT']:<9} | {r['MISSED']:<6} | {r['M_RATE']:<6}")
+        print()
+
         if not df_missed.empty and "reason" in df_missed.columns:
             reason_counts = df_missed["reason"].value_counts()
             print("Miss Reason Breakdown:")

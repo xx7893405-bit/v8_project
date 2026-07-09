@@ -1,6 +1,8 @@
 from backtest_config import BacktestConfig, RunConfig, StrategyConfig
+from coinmarketcap_market_data import CoinMarketCapMarketDataFeed
+from hybrid_market_data import HybridMarketDataFeed
 from market_data import CSVMarketDataFeed, MarketDataFeed
-from strategy_engine import MultiTimeframeBacktester
+from strategy_engine import BacktestSessionResult, MultiTimeframeBacktester
 
 __all__ = [
     "BacktestConfig",
@@ -8,6 +10,9 @@ __all__ = [
     "StrategyConfig",
     "MarketDataFeed",
     "CSVMarketDataFeed",
+    "CoinMarketCapMarketDataFeed",
+    "HybridMarketDataFeed",
+    "BacktestSessionResult",
     "MultiTimeframeBacktester",
     "build_default_backtester",
     "build_default_strategy",
@@ -21,22 +26,19 @@ def build_default_backtester() -> MultiTimeframeBacktester:
 
 def build_default_strategy() -> StrategyConfig:
     return StrategyConfig(
+        # Core risk / cost assumptions
         initial_balance=10000.0,
         risk_pct=0.01,
         slippage_usd=15.0,
-        entry_buffer_pct=0.20,
         maker_fee=0.0002,
         taker_fee=0.0005,
         max_vol_pct=0.05,
         funding_rate_8h=0.0001,
+
+        # Active breakout-only strategy inputs
         max_holding_bars=96,
-        min_net_profit_r=1.5,
         sl_sd_mult=1.4,
-        tp2_extension_sd_mult=1.5,
         mode="4H",
-        enable_be=False,
-        tp1_close_pct=0.0,
-        be_trigger_ratio=2.5,
         enable_breakout_entry=True,
         breakout_min_rr=1.3,
         entry_policy="breakout_only",
