@@ -24,6 +24,36 @@
 
 同步器會重抓最後五分鐘並以主鍵覆寫，避免資料斷線邊界遺漏；尚未收盤的 1m K 線不會寫入。
 
+## 同步現貨與永續合約
+
+同一個 DuckDB 可同時保存兩種市場，主鍵包含 `market_type` 與 `symbol`：
+
+```bash
+./venv/bin/python sync_spot_and_perp.py --lookback-days 45
+```
+
+每 15 分鐘由排程執行一次此命令即可；程式只會增量補齊資料。
+
+現貨回測：
+
+```bash
+./venv/bin/python run_ccxt_local_backtest.py \
+  --market-mode spot_only \
+  --leverage 1 \
+  --position-sizing-mode risk_based
+```
+
+永續合約回測：
+
+```bash
+./venv/bin/python run_ccxt_local_backtest.py \
+  --market-mode perp_only \
+  --leverage 1 \
+  --position-sizing-mode risk_based
+```
+
+`risk_based` 固定每筆風險，槓桿主要影響保證金占用與可建立的最大倉位；`fixed_margin` 則會以 `固定保證金 × 槓桿` 放大名義倉位。
+
 ## 本地 NFE 回測
 
 15m 訊號、1h 結構：

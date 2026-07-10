@@ -289,6 +289,42 @@ class DuckDBMarketDataFeed(MarketDataFeed):
         return self._load_1m().loc[start_time:end_time, list(columns)].copy()
 
 
+class DualMarketDataFeed(MarketDataFeed):
+    """Use one market for signals and another market for simulated execution."""
+
+    def __init__(
+        self,
+        signal_feed: DuckDBMarketDataFeed,
+        execution_feed: DuckDBMarketDataFeed,
+    ):
+        self.signal_feed = signal_feed
+        self.execution_feed = execution_feed
+
+    def load_timeframe(
+        self, timeframe: str, columns: Optional[Sequence[str]] = None
+    ) -> pd.DataFrame:
+        signal = self.signal_feed.load_timeframe(timeframe)
+        execution = self.execution_feed.load_timeframe(timeframe)
+        execution = execution.rename(columns={column: f"execution_{column}" for column in OHLCV_COLUMNS})
+        combined = signal.join(execution, how="inner")
+        if combined.empty:
+            raise FileNotFoundError(
+                f"Signal and execution markets have no aligned {timeframe} candles"
+            )
+        if columns is not None:
+            return combined[list(columns)].copy()
+        return combined
+
+    def load_micro_window(
+        self,
+        start_time: pd.Timestamp,
+        end_time: pd.Timestamp,
+        columns: Sequence[str],
+    ) -> pd.DataFrame:
+        # Stops, take-profits and their intra-bar order must use execution prices.
+        return self.execution_feed.load_micro_window(start_time, end_time, columns)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Synchronize closed 1m candles through CCXT.")
     parser.add_argument("--exchange", default="binance")

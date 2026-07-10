@@ -10,6 +10,8 @@ import pandas as pd
 
 from backtest_config import BacktestConfig, M1_COLUMNS, RunConfig, StrategyConfig
 from market_data import CSVMarketDataFeed, MarketDataFeed
+from strategy_base import BacktestStrategy
+from v8_strategy import V8FvgOverlapStrategy
 
 
 @dataclass
@@ -121,9 +123,17 @@ def calculate_realtime_fvg(df: pd.DataFrame, max_lifecycle_bars: int = 192) -> p
 
 
 class MultiTimeframeBacktester:
-    def __init__(self, config: Optional[BacktestConfig] = None, data_feed: Optional[MarketDataFeed] = None, data_dir: str = "."):
+    def __init__(
+        self,
+        config: Optional[BacktestConfig] = None,
+        data_feed: Optional[MarketDataFeed] = None,
+        data_dir: str = ".",
+        strategy: Optional[BacktestStrategy] = None,
+    ):
         self.config = config or BacktestConfig()
+        self._validate_backtest_config()
         self.data_feed = data_feed or CSVMarketDataFeed(data_dir=data_dir)
+        self.strategy = strategy or V8FvgOverlapStrategy()
         self.load_all_data()
 
     @property
@@ -132,6 +142,7 @@ class MultiTimeframeBacktester:
 
     def run_strategy(self, strategy: StrategyConfig) -> Tuple[List[dict], List[dict]]:
         self.config = strategy.to_backtest_config()
+        self._validate_backtest_config()
         return self.run_backtest(**strategy.to_run_config().__dict__)
 
     @staticmethod
@@ -161,10 +172,28 @@ class MultiTimeframeBacktester:
         return df
 
     def _load_primary_timeframes(self) -> None:
+        try:
+            self.df_5m = self.data_feed.load_timeframe("5m")
+        except FileNotFoundError:
+            self.df_5m = pd.DataFrame()
         self.df_15m = self.data_feed.load_timeframe("15m")
         self.df_1h = self.data_feed.load_timeframe("1h")
         self.df_4h = self.data_feed.load_timeframe("4h")
         self.df_1d = self.data_feed.load_timeframe("1d")
+
+    def get_timeframe_df(self, timeframe: str) -> pd.DataFrame:
+        timeframe_map = {
+            "5m": self.df_5m,
+            "15m": self.df_15m,
+            "1h": self.df_1h,
+            "4h": self.df_4h,
+            "1d": self.df_1d,
+        }
+        if timeframe not in timeframe_map:
+            raise ValueError(f"Unsupported timeframe: {timeframe}")
+        if timeframe_map[timeframe].empty:
+            raise FileNotFoundError(f"Timeframe data not loaded for: {timeframe}")
+        return timeframe_map[timeframe]
 
     def _load_micro_feed(self) -> None:
         try:
@@ -250,6 +279,37 @@ class MultiTimeframeBacktester:
         self.df_15m_indicators = self._build_indicator_matrix()
         print("💡 V8 頂級交易員抗噪重疊引擎封裝完畢。")
 
+    def _build_nfe_signal_frame(self, ltf: str) -> pd.DataFrame:
+        df_ltf = self.get_timeframe_df(ltf).copy()
+
+        df_1d_aligned = self.df_1d[["bias"]].copy()
+        df_1d_aligned.index = df_1d_aligned.index + pd.Timedelta(days=1)
+        df_4h_aligned = self.df_4h[["bias"]].copy()
+        df_4h_aligned.index = df_4h_aligned.index + pd.Timedelta(hours=4)
+
+        df_ltf["bias_1d"] = df_1d_aligned["bias"].reindex(df_ltf.index, method="ffill")
+        df_ltf["bias_4h"] = df_4h_aligned["bias"].reindex(df_ltf.index, method="ffill")
+        return df_ltf
+
+    def _get_signal_frame(self) -> pd.DataFrame:
+        signal_timeframe_getter = getattr(self.strategy, "signal_timeframe", None)
+        if callable(signal_timeframe_getter):
+            signal_timeframe = signal_timeframe_getter()
+            if signal_timeframe == "15m":
+                return self.df_15m_indicators.copy()
+            return self._build_nfe_signal_frame(signal_timeframe)
+        return self.df_15m_indicators.copy()
+
+    @staticmethod
+    def _execution_bar(signal_bar: pd.Series) -> pd.Series:
+        """Return execution OHLCV when a dual-market feed supplied it."""
+        execution_bar = signal_bar.copy()
+        for column in ("open", "high", "low", "close", "volume"):
+            execution_column = f"execution_{column}"
+            if execution_column in signal_bar.index and pd.notna(signal_bar[execution_column]):
+                execution_bar[column] = signal_bar[execution_column]
+        return execution_bar
+
     def _record_trade(self, active_pos: dict, exit_time: pd.Timestamp, pnl: float, result: str, exit_price: Optional[float] = None, fee: float = 0.0) -> dict:
         if exit_price is None:
             exit_price = active_pos["entry_price"]
@@ -271,6 +331,13 @@ class MultiTimeframeBacktester:
             "entry_balance": active_pos["entry_balance"],
             "fee": fee,
             "accumulated_funding": active_pos["accumulated_funding"],
+            "position_sizing_mode": active_pos.get("position_sizing_mode", self.config.position_sizing_mode),
+            "target_notional_usd": active_pos.get("target_notional_usd", 0.0),
+            "actual_notional_usd": active_pos.get("actual_notional_usd", active_pos["size"] * active_pos["entry_price"]),
+            "leverage": active_pos.get("leverage", self.config.leverage),
+            "initial_margin": active_pos.get("initial_margin", 0.0),
+            "maintenance_margin": active_pos.get("maintenance_margin", 0.0),
+            "liquidation_price": active_pos.get("liquidation_price"),
             "be_active": active_pos.get("be_active", False),
             "tp1_hit": active_pos.get("tp1_hit", False),
             "entry_mode": active_pos.get("entry_mode", "UNKNOWN"),
@@ -297,6 +364,56 @@ class MultiTimeframeBacktester:
             return quantity * (exit_price - entry_price)
         return quantity * (entry_price - exit_price)
 
+    def _apply_stop_exit_slippage(self, pos_type: str, exit_price: float) -> float:
+        if pos_type == "LONG":
+            return max(0.0, exit_price - self.config.stop_loss_slippage_usd)
+        return exit_price + self.config.stop_loss_slippage_usd
+
+    def _apply_liquidation_exit_slippage(self, pos_type: str, exit_price: float) -> float:
+        if pos_type == "LONG":
+            return max(0.0, exit_price - self.config.liquidation_slippage_usd)
+        return exit_price + self.config.liquidation_slippage_usd
+
+    def _max_notional_for_balance(self, balance: float) -> float:
+        leverage = max(self.config.leverage, 1.0)
+        if leverage <= 1.0:
+            return float("inf")
+        return max(0.0, balance * leverage)
+
+    def _cap_size_by_leverage(self, size: float, entry_price: float, balance: float) -> float:
+        if entry_price <= 0:
+            return 0.0
+        return min(size, self._max_notional_for_balance(balance) / entry_price)
+
+    def _update_position_margin_state(self, active_pos: dict) -> None:
+        leverage = max(float(active_pos.get("leverage", self.config.leverage)), 1.0)
+        if leverage <= 1.0:
+            active_pos["leverage"] = leverage
+            active_pos["initial_margin"] = 0.0
+            active_pos["maintenance_margin"] = 0.0
+            active_pos["liquidation_price"] = None
+            return
+        entry_price = float(active_pos["entry_price"])
+        remaining_qty = float(active_pos.get("remaining_size", active_pos["size"]))
+        notional = remaining_qty * entry_price
+        initial_margin = notional / leverage
+        maintenance_margin = notional * self.config.maintenance_margin_rate
+        liquidation_fee = notional * self.config.liquidation_fee_rate
+        funding = float(active_pos.get("accumulated_funding", 0.0))
+        per_unit_buffer = 0.0
+        if remaining_qty > 0:
+            per_unit_buffer = max(0.0, initial_margin - maintenance_margin - liquidation_fee - funding) / remaining_qty
+
+        if active_pos["type"] == "LONG":
+            liquidation_price = max(0.0, entry_price - per_unit_buffer)
+        else:
+            liquidation_price = entry_price + per_unit_buffer
+
+        active_pos["leverage"] = leverage
+        active_pos["initial_margin"] = initial_margin
+        active_pos["maintenance_margin"] = maintenance_margin
+        active_pos["liquidation_price"] = liquidation_price
+
     def _realize_tp1_partial(self, active_pos: dict, balance: float) -> float:
         if active_pos.get("tp1_realized", False) or active_pos["tp1_close_pct"] <= 0:
             return balance
@@ -314,6 +431,7 @@ class MultiTimeframeBacktester:
         active_pos["realized_fee"] += partial_fee
         active_pos["remaining_size"] = active_pos["size"] - partial_qty
         active_pos["tp1_realized"] = True
+        self._update_position_margin_state(active_pos)
         return balance + partial_pnl
 
     def _calculate_market_exit(self, active_pos: dict, exit_price: float, fee_rate: float) -> Tuple[float, float, float]:
@@ -416,6 +534,37 @@ class MultiTimeframeBacktester:
         if not cfg.allow_long_entries and not cfg.allow_short_entries:
             raise ValueError("At least one of allow_long_entries or allow_short_entries must be True")
 
+    def _validate_backtest_config(self) -> None:
+        if self.config.position_sizing_mode not in {"risk_based", "fixed_margin"}:
+            raise ValueError("position_sizing_mode must be one of: risk_based, fixed_margin")
+        if self.config.fixed_margin_usd <= 0:
+            raise ValueError("fixed_margin_usd must be positive")
+
+    def _build_position_sizing(
+        self,
+        *,
+        balance: float,
+        entry_price: float,
+        stop_distance: float,
+        volume_cap_units: float,
+    ) -> Tuple[float, float, float]:
+        if entry_price <= 0 or stop_distance <= 0:
+            return 0.0, 0.0, 0.0
+
+        if self.config.position_sizing_mode == "fixed_margin":
+            target_notional_usd = self.config.fixed_margin_usd * max(self.config.leverage, 1.0)
+            raw_size = target_notional_usd / entry_price
+        else:
+            initial_risk_usd = balance * self.config.risk_pct
+            raw_size = initial_risk_usd / stop_distance
+            target_notional_usd = raw_size * entry_price
+
+        size = min(raw_size, volume_cap_units)
+        size = self._cap_size_by_leverage(size, entry_price, balance)
+        actual_notional_usd = size * entry_price
+        actual_risk_usd = size * stop_distance
+        return size, actual_risk_usd, min(target_notional_usd, volume_cap_units * entry_price)
+
     @staticmethod
     def _allow_directions(mode: str, bias_1d: str, bias_4h: str, allow_long_entries: bool, allow_short_entries: bool) -> Tuple[bool, bool]:
         allowed_long, allowed_short = allow_long_entries, allow_short_entries
@@ -512,9 +661,23 @@ class MultiTimeframeBacktester:
 
         min_rr = self._breakout_min_rr_for_side(cfg, order_type)
         if net_sl_dist > 0 and is_valid_target and math_rr >= min_rr:
-            initial_risk_usd = balance * self.config.risk_pct
-            size = min(initial_risk_usd / net_sl_dist, order["volume_cap"])
-            return {
+            size, actual_risk_usd, target_notional_usd = self._build_position_sizing(
+                balance=balance,
+                entry_price=market_entry_p,
+                stop_distance=net_sl_dist,
+                volume_cap_units=order["volume_cap"],
+            )
+            if size <= 0:
+                return None, self._record_missed(
+                    order_type,
+                    curr_time,
+                    "INSUFFICIENT_MARGIN_FOR_LEVERAGE",
+                    signal_time=order["signal_time"],
+                    entry_price=market_entry_p,
+                    leverage=self.config.leverage,
+                    position_sizing_mode=self.config.position_sizing_mode,
+                )
+            position = {
                 "type": order_type,
                 "entry_idx": order["created_idx"] + 1,
                 "entry_time": curr_time,
@@ -525,7 +688,7 @@ class MultiTimeframeBacktester:
                 "size": size,
                 "entry_balance": balance,
                 "rr_potential": math_rr,
-                "actual_risk_usd": size * net_sl_dist,
+                "actual_risk_usd": actual_risk_usd,
                 "tp1_hit": False,
                 "be_active": False,
                 "accumulated_funding": 0.0,
@@ -536,7 +699,13 @@ class MultiTimeframeBacktester:
                 "tp1_realized": False,
                 "entry_mode": "BREAKOUT",
                 "exit_model": order["exit_model"],
-            }, None
+                "position_sizing_mode": self.config.position_sizing_mode,
+                "target_notional_usd": target_notional_usd,
+                "actual_notional_usd": size * market_entry_p,
+                "leverage": self.config.leverage,
+            }
+            self._update_position_margin_state(position)
+            return position, None
 
         missed = self._record_missed(
             order_type,
@@ -560,9 +729,11 @@ class MultiTimeframeBacktester:
         prev_time: pd.Timestamp,
         balance: float,
         trades: List[dict],
+        is_liq_hit: bool,
         is_sl_hit: bool,
         is_tp1_hit_now: bool,
         is_tp2_hit_now: bool,
+        liquidation_price: float,
         current_sl: float,
         be_active: bool,
         a_is_low: bool,
@@ -570,6 +741,31 @@ class MultiTimeframeBacktester:
     ) -> Tuple[Optional[dict], float]:
         tp1 = active_position["tp1"]
         tp2 = active_position["tp2"]
+
+        if is_liq_hit and is_tp1_hit_now:
+            seq = self._check_1m_sequence(prev_time, curr_time, liquidation_price, tp1, a_is_low=a_is_low, b_is_high=b_is_high)
+            if seq == "B":
+                active_position["tp1_hit"] = True
+                if is_tp2_hit_now:
+                    net_pnl, balance_delta, fee = self._calculate_take_profit_all(active_position)
+                    balance += balance_delta
+                    trades.append(self._record_trade(active_position, curr_time, net_pnl, "TAKE_PROFIT_ALL", exit_price=tp2, fee=fee))
+                    return None, balance
+                balance = self._realize_tp1_partial(active_position, balance)
+                return active_position, balance
+
+            slipped_exit_price = self._apply_liquidation_exit_slippage(active_position["type"], liquidation_price)
+            net_pnl, balance_delta, fee = self._calculate_market_exit(active_position, slipped_exit_price, self.config.liquidation_fee_rate)
+            balance += balance_delta
+            trades.append(self._record_trade(active_position, curr_time, net_pnl, "LIQUIDATION", exit_price=slipped_exit_price, fee=fee))
+            return None, balance
+
+        if is_liq_hit:
+            slipped_exit_price = self._apply_liquidation_exit_slippage(active_position["type"], liquidation_price)
+            net_pnl, balance_delta, fee = self._calculate_market_exit(active_position, slipped_exit_price, self.config.liquidation_fee_rate)
+            balance += balance_delta
+            trades.append(self._record_trade(active_position, curr_time, net_pnl, "LIQUIDATION", exit_price=slipped_exit_price, fee=fee))
+            return None, balance
 
         if is_sl_hit and is_tp1_hit_now:
             seq = self._check_1m_sequence(prev_time, curr_time, current_sl, tp1, a_is_low=a_is_low, b_is_high=b_is_high)
@@ -583,17 +779,19 @@ class MultiTimeframeBacktester:
                 balance = self._realize_tp1_partial(active_position, balance)
                 return active_position, balance
 
-            net_pnl, balance_delta, fee = self._calculate_market_exit(active_position, current_sl, self.config.taker_fee)
+            slipped_exit_price = self._apply_stop_exit_slippage(active_position["type"], current_sl)
+            net_pnl, balance_delta, fee = self._calculate_market_exit(active_position, slipped_exit_price, self.config.taker_fee)
             balance += balance_delta
             result = "BREAKEVEN" if be_active else "STOP_LOSS"
-            trades.append(self._record_trade(active_position, curr_time, net_pnl, result, exit_price=current_sl, fee=fee))
+            trades.append(self._record_trade(active_position, curr_time, net_pnl, result, exit_price=slipped_exit_price, fee=fee))
             return None, balance
 
         if is_sl_hit:
-            net_pnl, balance_delta, fee = self._calculate_market_exit(active_position, current_sl, self.config.taker_fee)
+            slipped_exit_price = self._apply_stop_exit_slippage(active_position["type"], current_sl)
+            net_pnl, balance_delta, fee = self._calculate_market_exit(active_position, slipped_exit_price, self.config.taker_fee)
             balance += balance_delta
             result = "BREAKEVEN" if be_active else "STOP_LOSS"
-            trades.append(self._record_trade(active_position, curr_time, net_pnl, result, exit_price=current_sl, fee=fee))
+            trades.append(self._record_trade(active_position, curr_time, net_pnl, result, exit_price=slipped_exit_price, fee=fee))
             return None, balance
 
         if is_tp1_hit_now:
@@ -637,13 +835,17 @@ class MultiTimeframeBacktester:
         if curr_time.hour % 8 == 0 and curr_time.minute == 0:
             active_position["accumulated_funding"] += active_position["size"] * curr["open"] * self.config.funding_rate_8h
 
+        self._update_position_margin_state(active_position)
+
         pos_type = active_position["type"]
         entry_price = active_position["entry_price"]
         current_sl = active_position["sl"]
         tp1 = active_position["tp1"]
         tp2 = active_position["tp2"]
+        liquidation_price = active_position["liquidation_price"]
         tp1_hit = active_position.get("tp1_hit", False)
         be_active = active_position.get("be_active", False)
+        use_liquidation = active_position.get("leverage", self.config.leverage) > 1.0 and liquidation_price is not None
 
         be_trigger_p = entry_price + (tp1 - entry_price) * cfg.be_trigger_ratio if pos_type == "LONG" else entry_price - (entry_price - tp1) * cfg.be_trigger_ratio
         is_be_trigger_hit = (curr["high"] >= be_trigger_p) if pos_type == "LONG" else (curr["low"] <= be_trigger_p)
@@ -653,6 +855,7 @@ class MultiTimeframeBacktester:
             current_sl = entry_price
 
         if pos_type == "LONG":
+            is_liq_hit = use_liquidation and curr["low"] <= liquidation_price
             is_sl_hit = curr["low"] <= current_sl
             is_tp1_hit_now = (not tp1_hit) and (curr["high"] >= tp1)
             is_tp2_hit_now = curr["high"] >= tp2
@@ -662,15 +865,18 @@ class MultiTimeframeBacktester:
                 prev_time,
                 balance,
                 trades,
+                is_liq_hit,
                 is_sl_hit,
                 is_tp1_hit_now,
                 is_tp2_hit_now,
+                liquidation_price,
                 current_sl,
                 be_active,
                 a_is_low=True,
                 b_is_high=True,
             )
 
+        is_liq_hit = use_liquidation and curr["high"] >= liquidation_price
         is_sl_hit = curr["high"] >= current_sl
         is_tp1_hit_now = (not tp1_hit) and (curr["low"] <= tp1)
         is_tp2_hit_now = curr["low"] <= tp2
@@ -680,9 +886,11 @@ class MultiTimeframeBacktester:
             prev_time,
             balance,
             trades,
+            is_liq_hit,
             is_sl_hit,
             is_tp1_hit_now,
             is_tp2_hit_now,
+            liquidation_price,
             current_sl,
             be_active,
             a_is_low=False,
@@ -703,7 +911,7 @@ class MultiTimeframeBacktester:
             return pending_retest_order, active_position, balance
 
         o_type = pending_retest_order["type"]
-        limit_price = pending_retest_order["entry_price"]
+        limit_price = pending_retest_order.get("limit_price", pending_retest_order["entry_price"])
         sl_p = pending_retest_order["sl"]
 
         if (loop_index - pending_retest_order["created_idx"]) > 72:
@@ -744,7 +952,7 @@ class MultiTimeframeBacktester:
                 active_position = pending_retest_order
                 active_position["entry_idx"] = loop_index
                 active_position["entry_time"] = curr_time
-                balance -= (active_position["size"] * limit_price) * self.config.maker_fee
+                balance -= (active_position["size"] * active_position["entry_price"]) * self.config.maker_fee
                 return None, active_position, balance
             return pending_retest_order, active_position, balance
 
@@ -767,7 +975,7 @@ class MultiTimeframeBacktester:
             active_position = pending_retest_order
             active_position["entry_idx"] = loop_index
             active_position["entry_time"] = curr_time
-            balance -= (active_position["size"] * limit_price) * self.config.maker_fee
+            balance -= (active_position["size"] * active_position["entry_price"]) * self.config.maker_fee
             return None, active_position, balance
         return pending_retest_order, active_position, balance
 
@@ -800,25 +1008,55 @@ class MultiTimeframeBacktester:
         if net_sl_dist <= 0 or not valid_target:
             return None, None
 
+        effective_entry_price = (
+            entry_price + self.config.limit_order_slippage_usd
+            if side == "LONG"
+            else entry_price - self.config.limit_order_slippage_usd
+        )
+        effective_net_sl_dist = (
+            (effective_entry_price - sl) if side == "LONG" else (sl - effective_entry_price)
+        )
+        effective_net_sl_dist += (effective_entry_price * self.config.maker_fee) + (sl * self.config.taker_fee)
+        if effective_net_sl_dist <= 0:
+            return None, None
+
         if side == "LONG":
-            math_rr = ((tp1 - entry_price) * tp1_close_pct + (tp2 - entry_price) * (1.0 - tp1_close_pct)) / net_sl_dist
+            math_rr = (
+                (tp1 - effective_entry_price) * tp1_close_pct + (tp2 - effective_entry_price) * (1.0 - tp1_close_pct)
+            ) / effective_net_sl_dist
         else:
-            math_rr = ((entry_price - tp1) * tp1_close_pct + (entry_price - tp2) * (1.0 - tp1_close_pct)) / net_sl_dist
+            math_rr = (
+                (effective_entry_price - tp1) * tp1_close_pct + (effective_entry_price - tp2) * (1.0 - tp1_close_pct)
+            ) / effective_net_sl_dist
 
         if math_rr >= self.config.min_net_profit_r:
-            initial_risk_usd = balance * self.config.risk_pct
-            size = min(initial_risk_usd / net_sl_dist, prev["volume"] * self.config.max_vol_pct)
-            return {
+            size, actual_risk_usd, target_notional_usd = self._build_position_sizing(
+                balance=balance,
+                entry_price=effective_entry_price,
+                stop_distance=effective_net_sl_dist,
+                volume_cap_units=prev["volume"] * self.config.max_vol_pct,
+            )
+            if size <= 0:
+                return None, self._record_missed(
+                    side,
+                    curr_time,
+                    "INSUFFICIENT_MARGIN_FOR_LEVERAGE",
+                    entry_price=effective_entry_price,
+                    leverage=self.config.leverage,
+                    position_sizing_mode=self.config.position_sizing_mode,
+                )
+            order = {
                 "type": side,
                 "created_idx": None,
-                "entry_price": entry_price,
+                "entry_price": effective_entry_price,
+                "limit_price": entry_price,
                 "sl": sl,
                 "tp1": tp1,
                 "tp2": tp2,
                 "size": size,
                 "entry_balance": balance,
                 "rr_potential": math_rr,
-                "actual_risk_usd": size * net_sl_dist,
+                "actual_risk_usd": actual_risk_usd,
                 "tp1_hit": False,
                 "be_active": False,
                 "accumulated_funding": 0.0,
@@ -828,7 +1066,13 @@ class MultiTimeframeBacktester:
                 "realized_fee": 0.0,
                 "tp1_realized": False,
                 "entry_mode": "RETRACE",
-            }, None
+                "position_sizing_mode": self.config.position_sizing_mode,
+                "target_notional_usd": target_notional_usd,
+                "actual_notional_usd": size * effective_entry_price,
+                "leverage": self.config.leverage,
+            }
+            self._update_position_margin_state(order)
+            return order, None
 
         return None, self._record_missed(
             side,
@@ -842,103 +1086,6 @@ class MultiTimeframeBacktester:
             rr=math_rr,
         )
 
-    def _scan_entry_signal(
-        self,
-        prev: pd.Series,
-        curr: pd.Series,
-        curr_time: pd.Timestamp,
-        balance: float,
-        cfg: RunConfig,
-    ) -> Tuple[Optional[dict], Optional[dict], List[dict]]:
-        missed: List[dict] = []
-        selected_exit_model = self._select_exit_model(prev, cfg)
-        if selected_exit_model is None:
-            return None, None, missed
-
-        allowed_long, allowed_short = self._allow_directions(
-            cfg.mode,
-            prev["bias_1d"],
-            prev["bias_4h"],
-            cfg.allow_long_entries,
-            cfg.allow_short_entries,
-        )
-        allow_retrace_entry = cfg.entry_policy in {"hybrid", "retrace_only"}
-        allow_breakout_entry = cfg.enable_breakout_entry and cfg.entry_policy in {"hybrid", "breakout_only"}
-
-        if allowed_long and prev["is_fvg_overlap_long"] and pd.notna(prev["long_overlap_top"]) and pd.notna(prev["long_overlap_bottom"]):
-            vwap_long_ok = (not cfg.use_vwap_direction_filter) or (prev["close"] > prev["VWAP"])
-            if vwap_long_ok and prev["local_bias"] == "LONG":
-                overlap_height = prev["long_overlap_top"] - prev["long_overlap_bottom"]
-                limit_p = prev["long_overlap_top"] - (overlap_height * self.config.entry_buffer_pct)
-                vwap_sd_padding = max(prev["VWAP_SD"], 80.0) if pd.notna(prev["VWAP_SD"]) else 80.0
-                tp2_extension_sd_mult = self._dynamic_tp2_extension_sd_mult(prev)
-
-                if allow_retrace_entry:
-                    entry_price = limit_p
-                    sl = round(entry_price - (vwap_sd_padding * self.config.sl_sd_mult), 2)
-                    tp1 = round(prev["VWAP_1.0_SD_Upper"], 2)
-                    tp2 = round(prev["VWAP_2.0_SD_Upper"] + vwap_sd_padding * tp2_extension_sd_mult, 2)
-                    expected_fee_drag = (entry_price * self.config.maker_fee) + (sl * self.config.taker_fee)
-                    net_sl_dist = (entry_price - sl) + expected_fee_drag
-                    order, miss = self._build_retrace_order("LONG", prev, curr_time, balance, cfg.tp1_close_pct, entry_price, sl, tp1, tp2, net_sl_dist)
-                    if order is not None:
-                        return order, None, missed
-                    if miss is not None:
-                        missed.append(miss)
-                    return None, None, missed
-
-                if allow_breakout_entry and curr["close"] > prev["high"]:
-                    return None, {
-                        "type": "LONG",
-                        "created_idx": None,
-                        "signal_time": curr_time,
-                        "exit_model": selected_exit_model,
-                        "vwap_sd_padding": vwap_sd_padding,
-                        "tp1": round(prev["VWAP_1.0_SD_Upper"], 2),
-                        "tp2": round(prev["VWAP_2.0_SD_Upper"] + vwap_sd_padding * tp2_extension_sd_mult, 2),
-                        "structure_sl": prev["long_overlap_bottom"],
-                        "atr": prev["ATR_14"],
-                        "volume_cap": curr["volume"] * self.config.max_vol_pct,
-                    }, missed
-
-        if allowed_short and prev["is_fvg_overlap_short"] and pd.notna(prev["short_overlap_bottom"]) and pd.notna(prev["short_overlap_top"]):
-            vwap_short_ok = (not cfg.use_vwap_direction_filter) or (prev["close"] < prev["VWAP"])
-            if vwap_short_ok and prev["local_bias"] == "SHORT":
-                overlap_height = prev["short_overlap_top"] - prev["short_overlap_bottom"]
-                limit_p = prev["short_overlap_bottom"] + (overlap_height * self.config.entry_buffer_pct)
-                vwap_sd_padding = max(prev["VWAP_SD"], 80.0) if pd.notna(prev["VWAP_SD"]) else 80.0
-                tp2_extension_sd_mult = self._dynamic_tp2_extension_sd_mult(prev)
-
-                if allow_retrace_entry:
-                    entry_price = limit_p
-                    sl = round(entry_price + (vwap_sd_padding * self.config.sl_sd_mult), 2)
-                    tp1 = round(prev["VWAP_1.0_SD_Lower"], 2)
-                    tp2 = round(prev["VWAP_2.0_SD_Lower"] - vwap_sd_padding * tp2_extension_sd_mult, 2)
-                    expected_fee_drag = (entry_price * self.config.maker_fee) + (sl * self.config.taker_fee)
-                    net_sl_dist = (sl - entry_price) + expected_fee_drag
-                    order, miss = self._build_retrace_order("SHORT", prev, curr_time, balance, cfg.tp1_close_pct, entry_price, sl, tp1, tp2, net_sl_dist)
-                    if order is not None:
-                        return order, None, missed
-                    if miss is not None:
-                        missed.append(miss)
-                    return None, None, missed
-
-                if allow_breakout_entry and curr["close"] < prev["low"]:
-                    return None, {
-                        "type": "SHORT",
-                        "created_idx": None,
-                        "signal_time": curr_time,
-                        "exit_model": selected_exit_model,
-                        "vwap_sd_padding": vwap_sd_padding,
-                        "tp1": round(prev["VWAP_1.0_SD_Lower"], 2),
-                        "tp2": round(prev["VWAP_2.0_SD_Lower"] - vwap_sd_padding * tp2_extension_sd_mult, 2),
-                        "structure_sl": prev["short_overlap_top"],
-                        "atr": prev["ATR_14"],
-                        "volume_cap": curr["volume"] * self.config.max_vol_pct,
-                    }, missed
-
-        return None, None, missed
-
     def run_session(self, force_close_at_end: bool = True, **kwargs: object) -> BacktestSessionResult:
         cfg = RunConfig(**kwargs)
         self._validate_run_config(cfg)
@@ -946,7 +1093,7 @@ class MultiTimeframeBacktester:
         balance = self.initial_balance
         trades: List[dict] = []
         missed_trades: List[dict] = []
-        df = self.df_15m_indicators.copy()
+        df = self._get_signal_frame()
         active_position: Optional[dict] = None
         pending_retest_order: Optional[dict] = None
         pending_breakout_order: Optional[dict] = None
@@ -955,11 +1102,12 @@ class MultiTimeframeBacktester:
         for i in range(lookback, len(df)):
             prev = df.iloc[i - 1]
             curr = df.iloc[i]
+            execution_curr = self._execution_bar(curr)
             curr_time = df.index[i]
             prev_time = df.index[i - 1]
 
             if active_position is None and pending_breakout_order is not None and i > pending_breakout_order["created_idx"]:
-                position, missed = self._build_breakout_position(pending_breakout_order, curr, curr_time, balance, cfg)
+                position, missed = self._build_breakout_position(pending_breakout_order, execution_curr, curr_time, balance, cfg)
                 if position is not None:
                     active_position = position
                     balance -= (position["size"] * position["entry_price"]) * self.config.taker_fee
@@ -968,14 +1116,14 @@ class MultiTimeframeBacktester:
                 pending_breakout_order = None
 
             if active_position is not None:
-                active_position, balance = self._manage_active_position(active_position, curr, curr_time, prev_time, i, balance, trades, cfg)
+                active_position, balance = self._manage_active_position(active_position, execution_curr, curr_time, prev_time, i, balance, trades, cfg)
                 if active_position is None:
                     continue
 
             pending_retest_order, active_position, balance = self._handle_pending_retest_order(
                 pending_retest_order,
                 active_position,
-                curr,
+                execution_curr,
                 curr_time,
                 i,
                 balance,
@@ -983,17 +1131,17 @@ class MultiTimeframeBacktester:
             )
 
             if active_position is None and pending_retest_order is None and pending_breakout_order is None:
-                retrace_order, breakout_order, missed = self._scan_entry_signal(prev, curr, curr_time, balance, cfg)
-                missed_trades.extend(missed)
-                if retrace_order is not None:
-                    retrace_order["created_idx"] = i
-                    pending_retest_order = retrace_order
-                elif breakout_order is not None:
-                    breakout_order["created_idx"] = i
-                    pending_breakout_order = breakout_order
+                decision = self.strategy.scan_entry_signal(self, prev, curr, curr_time, balance, cfg)
+                missed_trades.extend(decision.missed)
+                if decision.retrace_order is not None:
+                    decision.retrace_order["created_idx"] = i
+                    pending_retest_order = decision.retrace_order
+                elif decision.breakout_order is not None:
+                    decision.breakout_order["created_idx"] = i
+                    pending_breakout_order = decision.breakout_order
 
         if force_close_at_end and active_position is not None:
-            last_bar = df.iloc[-1]
+            last_bar = self._execution_bar(df.iloc[-1])
             net_pnl, balance_delta, fee = self._calculate_market_exit(active_position, last_bar["close"], self.config.taker_fee)
             balance += balance_delta
             trades.append(self._record_trade(active_position, df.index[-1], net_pnl, "FORCE_CLOSE", exit_price=last_bar["close"], fee=fee))
@@ -1016,8 +1164,9 @@ class MultiTimeframeBacktester:
         self.config = strategy.to_backtest_config()
         session = self.run_session(force_close_at_end=False, **strategy.to_run_config().__dict__)
         latest_time = None
-        if not self.df_15m_indicators.empty:
-            latest_time = self.df_15m_indicators.index[-1]
+        signal_df = self._get_signal_frame()
+        if not signal_df.empty:
+            latest_time = signal_df.index[-1]
         latest_trade = session.trades[-1] if session.trades else None
         latest_missed = session.missed_trades[-1] if session.missed_trades else None
         return {
@@ -1035,7 +1184,19 @@ class MultiTimeframeBacktester:
     def analyze_results(self, trades: Sequence[dict]) -> dict:
         total_trades = len(trades)
         if total_trades == 0:
-            return {"trades": 0, "win_rate": 0.0, "profit_pct": 0.0, "tp_all": 0, "be": 0, "sl": 0, "time_stop": 0, "avg_potential_rr": 0.0, "avg_realized_rr": 0.0, "avg_trade_r": 0.0}
+            return {
+                "trades": 0,
+                "win_rate": 0.0,
+                "profit_pct": 0.0,
+                "tp_all": 0,
+                "be": 0,
+                "sl": 0,
+                "liq": 0,
+                "time_stop": 0,
+                "avg_potential_rr": 0.0,
+                "avg_realized_rr": 0.0,
+                "avg_trade_r": 0.0,
+            }
 
         df_trades = pd.DataFrame(trades)
         wins = df_trades[df_trades["result"] == "TAKE_PROFIT_ALL"]
@@ -1051,6 +1212,7 @@ class MultiTimeframeBacktester:
             "tp_all": len(df_trades[df_trades["result"] == "TAKE_PROFIT_ALL"]) + len(df_trades[(df_trades["result"] == "FORCE_CLOSE") & (df_trades["pnl"] > 0)]),
             "be": len(df_trades[df_trades["result"] == "BREAKEVEN"]),
             "sl": len(df_trades[df_trades["result"] == "STOP_LOSS"]) + len(df_trades[(df_trades["result"] == "FORCE_CLOSE") & (df_trades["pnl"] <= 0)]),
+            "liq": len(df_trades[df_trades["result"] == "LIQUIDATION"]),
             "time_stop": len(df_trades[df_trades["result"] == "TIME_STOP"]),
             "avg_potential_rr": avg_potential_rr,
             "avg_realized_rr": avg_win_r / avg_loss_r if avg_loss_r > 0 else 0.0,
@@ -1074,6 +1236,7 @@ class MultiTimeframeBacktester:
             "BE": int(res["be"]),
             "TS": int(res["time_stop"]),
             "SL": int(res["sl"]),
+            "LIQ": int(res["liq"]),
             "PROFIT": f"{direction_profit_pct:+.2f}%",
             "MISSED": missed_count,
             "M_RATE": f"{miss_rate:.1f}%",
@@ -1098,7 +1261,7 @@ class MultiTimeframeBacktester:
         reports = []
         overall_res = self.analyze_results(trades)
         overall_m_rate = (len(df_missed) / (overall_res["trades"] + len(df_missed)) * 100) if (overall_res["trades"] + len(df_missed)) > 0 else 0.0
-        reports.append({"PERIOD": "TOTAL", "TRADES": int(overall_res["trades"]), "P_RR": f"1:{overall_res['avg_potential_rr']:.2f}", "R_RR": f"1:{overall_res['avg_realized_rr']:.2f}", "E_R": f"{overall_res['avg_trade_r']:+.2f}", "WIN%": f"{overall_res['win_rate']:.2f}%", "TP2": int(overall_res["tp_all"]), "BE": int(overall_res["be"]), "TS": int(overall_res["time_stop"]), "SL": int(overall_res["sl"]), "PROFIT": f"{overall_res['profit_pct']:+.2f}%", "MISSED": len(df_missed), "M_RATE": f"{overall_m_rate:.1f}%"})
+        reports.append({"PERIOD": "TOTAL", "TRADES": int(overall_res["trades"]), "P_RR": f"1:{overall_res['avg_potential_rr']:.2f}", "R_RR": f"1:{overall_res['avg_realized_rr']:.2f}", "E_R": f"{overall_res['avg_trade_r']:+.2f}", "WIN%": f"{overall_res['win_rate']:.2f}%", "TP2": int(overall_res["tp_all"]), "BE": int(overall_res["be"]), "TS": int(overall_res["time_stop"]), "SL": int(overall_res["sl"]), "LIQ": int(overall_res["liq"]), "PROFIT": f"{overall_res['profit_pct']:+.2f}%", "MISSED": len(df_missed), "M_RATE": f"{overall_m_rate:.1f}%"})
 
         for m_str in all_months:
             m_period = pd.Period(m_str, freq="M")
@@ -1106,7 +1269,7 @@ class MultiTimeframeBacktester:
             m_missed_cnt = len(df_missed[df_missed["month"] == m_period]) if not df_missed.empty else 0
             m_res = self.analyze_results(m_trades_sub)
             m_rate_val = (m_missed_cnt / (m_res["trades"] + m_missed_cnt) * 100) if (m_res["trades"] + m_missed_cnt) > 0 else 0.0
-            reports.append({"PERIOD": m_str, "TRADES": int(m_res["trades"]), "P_RR": f"1:{m_res['avg_potential_rr']:.2f}", "R_RR": f"1:{m_res['avg_realized_rr']:.2f}", "E_R": f"{m_res['avg_trade_r']:+.2f}", "WIN%": f"{m_res['win_rate']:.2f}%", "TP2": int(m_res["tp_all"]), "BE": int(m_res["be"]), "TS": int(m_res["time_stop"]), "SL": int(m_res["sl"]), "PROFIT": f"{m_res['profit_pct']:+.2f}%", "MISSED": m_missed_cnt, "M_RATE": f"{m_rate_val:.1f}%"})
+            reports.append({"PERIOD": m_str, "TRADES": int(m_res["trades"]), "P_RR": f"1:{m_res['avg_potential_rr']:.2f}", "R_RR": f"1:{m_res['avg_realized_rr']:.2f}", "E_R": f"{m_res['avg_trade_r']:+.2f}", "WIN%": f"{m_res['win_rate']:.2f}%", "TP2": int(m_res["tp_all"]), "BE": int(m_res["be"]), "TS": int(m_res["time_stop"]), "SL": int(m_res["sl"]), "LIQ": int(m_res["liq"]), "PROFIT": f"{m_res['profit_pct']:+.2f}%", "MISSED": m_missed_cnt, "M_RATE": f"{m_rate_val:.1f}%"})
 
         def pad_cjk(text: object, width: int) -> str:
             text = str(text)
@@ -1114,15 +1277,15 @@ class MultiTimeframeBacktester:
             actual_pad = max(0, width - len(text) - cjk_count)
             return text + " " * actual_pad
 
-        print("\n" + "=" * 125)
+        print("\n" + "=" * 133)
         print(f" V8 Omniscient Eye Report (策略分流版 v9.9) - {strategy_name}")
-        print("=" * 125)
-        header = f"{pad_cjk('PERIOD', 12)} | {'TRADES':<6} | {'P_RR':<8} | {'RE_RR':<8} | {'E_R':<6} | {'WIN%':<8} | {'TP2':<5} | {'BE':<5} | {'TS':<5} | {'SL':<5} | {'PROFIT':<9} | {'MISSED':<6} | {'M_RATE':<6}"
+        print("=" * 133)
+        header = f"{pad_cjk('PERIOD', 12)} | {'TRADES':<6} | {'P_RR':<8} | {'RE_RR':<8} | {'E_R':<6} | {'WIN%':<8} | {'TP2':<5} | {'BE':<5} | {'TS':<5} | {'SL':<5} | {'LIQ':<5} | {'PROFIT':<9} | {'MISSED':<6} | {'M_RATE':<6}"
         print(header)
-        print("-" * 125)
+        print("-" * 133)
         for r in reports:
-            print(f"{pad_cjk(r['PERIOD'], 12)} | {r['TRADES']:<6} | {r['P_RR']:<8} | {r['R_RR']:<8} | {r['E_R']:<6} | {r['WIN%']:<8} | {r['TP2']:<5} | {r['BE']:<5} | {r['TS']:<5} | {r['SL']:<5} | {r['PROFIT']:<9} | {r['MISSED']:<6} | {r['M_RATE']:<6}")
-        print("=" * 125 + "\n")
+            print(f"{pad_cjk(r['PERIOD'], 12)} | {r['TRADES']:<6} | {r['P_RR']:<8} | {r['R_RR']:<8} | {r['E_R']:<6} | {r['WIN%']:<8} | {r['TP2']:<5} | {r['BE']:<5} | {r['TS']:<5} | {r['SL']:<5} | {r['LIQ']:<5} | {r['PROFIT']:<9} | {r['MISSED']:<6} | {r['M_RATE']:<6}")
+        print("=" * 133 + "\n")
 
         long_trades = df_trades[df_trades["type"] == "LONG"].to_dict("records") if not df_trades.empty and "type" in df_trades.columns else []
         short_trades = df_trades[df_trades["type"] == "SHORT"].to_dict("records") if not df_trades.empty and "type" in df_trades.columns else []
@@ -1135,11 +1298,11 @@ class MultiTimeframeBacktester:
         ]
 
         print("Direction Breakdown:")
-        print("-" * 125)
-        print(f"{'SIDE':<12} | {'TRADES':<6} | {'P_RR':<8} | {'RE_RR':<8} | {'E_R':<6} | {'WIN%':<8} | {'TP2':<5} | {'BE':<5} | {'TS':<5} | {'SL':<5} | {'PROFIT':<9} | {'MISSED':<6} | {'M_RATE':<6}")
-        print("-" * 125)
+        print("-" * 133)
+        print(f"{'SIDE':<12} | {'TRADES':<6} | {'P_RR':<8} | {'RE_RR':<8} | {'E_R':<6} | {'WIN%':<8} | {'TP2':<5} | {'BE':<5} | {'TS':<5} | {'SL':<5} | {'LIQ':<5} | {'PROFIT':<9} | {'MISSED':<6} | {'M_RATE':<6}")
+        print("-" * 133)
         for r in direction_reports:
-            print(f"{r['SIDE']:<12} | {r['TRADES']:<6} | {r['P_RR']:<8} | {r['R_RR']:<8} | {r['E_R']:<6} | {r['WIN%']:<8} | {r['TP2']:<5} | {r['BE']:<5} | {r['TS']:<5} | {r['SL']:<5} | {r['PROFIT']:<9} | {r['MISSED']:<6} | {r['M_RATE']:<6}")
+            print(f"{r['SIDE']:<12} | {r['TRADES']:<6} | {r['P_RR']:<8} | {r['R_RR']:<8} | {r['E_R']:<6} | {r['WIN%']:<8} | {r['TP2']:<5} | {r['BE']:<5} | {r['TS']:<5} | {r['SL']:<5} | {r['LIQ']:<5} | {r['PROFIT']:<9} | {r['MISSED']:<6} | {r['M_RATE']:<6}")
         print()
 
         if not df_missed.empty and "reason" in df_missed.columns:
