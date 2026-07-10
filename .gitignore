@@ -40,6 +40,8 @@ env/
 
 # Large CSV data files (avoid uploading heavy data to GitHub)
 *.csv
+*.duckdb
+*.duckdb.wal
 202407-2507/
 202507-2607/
 未命名檔案夾/
