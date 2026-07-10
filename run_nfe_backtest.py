@@ -83,8 +83,7 @@ def run_nfe_folder_backtest(folder_name):
 
 
 if __name__ == "__main__":
-    # 定義歷史資料夾名稱
-    folders = ["202407-2507", "202507-2607"]
+    folders = sys.argv[1:] or ["202407-2507", "202507-2607"]
     
     for folder in folders:
         run_nfe_folder_backtest(folder)

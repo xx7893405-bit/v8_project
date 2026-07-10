@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional, Protocol
+from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -23,17 +23,6 @@ class ExecutionResult:
     message: str = ""
 
 
-class ExchangeExecutionClient(Protocol):
-    def submit_order(self, order: ExecutionOrder) -> ExecutionResult:
-        ...
-
-    def cancel_all(self) -> None:
-        ...
-
-    def get_position(self) -> Optional[dict]:
-        ...
-
-
 class DryRunExecutionClient:
     def submit_order(self, order: ExecutionOrder) -> ExecutionResult:
         return ExecutionResult(
@@ -51,7 +40,7 @@ class DryRunExecutionClient:
 
 
 class LiveExecutionEngine:
-    def __init__(self, client: ExchangeExecutionClient):
+    def __init__(self, client):
         self.client = client
 
     def submit_entry_from_position(self, position: dict) -> ExecutionResult:

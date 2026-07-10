@@ -1,6 +1,5 @@
 numpy
 pandas
 requests
-tabulate
 ccxt
 duckdb

@@ -42,6 +42,9 @@ env/
 *.csv
 *.duckdb
 *.duckdb.wal
+*_report_*.json
+*_diagnostic.json
 202407-2507/
 202507-2607/
+202407-2607_continuous/
 未命名檔案夾/
