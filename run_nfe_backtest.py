@@ -11,7 +11,13 @@ DEFAULT_NFE_POSITION_SIZING_MODE = "risk_based"
 DEFAULT_NFE_FIXED_MARGIN_USD = 1000.0
 
 
-def run_nfe_folder_backtest(folder_name):
+def run_nfe_folder_backtest(
+    folder_name,
+    *,
+    max_short_rr=None,
+    max_short_stop_atr=None,
+    report_prefix=None,
+):
     print("\n" + "="*95)
     print(f"🚀 開始執行資料夾 【{folder_name}】 NFE 雙級別交易戰法回測...")
     print("="*95)
@@ -57,6 +63,8 @@ def run_nfe_folder_backtest(folder_name):
             ob_range_type="full", # 完整 OB 區間
             min_rr=3.0,           # 最低 3R
             sl_padding=20.0,      # 停損緩衝
+            max_short_rr=max_short_rr,
+            max_short_stop_atr=max_short_stop_atr,
         )
         
         backtester = MultiTimeframeBacktester(
@@ -72,7 +80,11 @@ def run_nfe_folder_backtest(folder_name):
         print("\n👉 正在運行：NFE 雙級別 (1H/15m) 共振戰法 (3.0R 起步)...")
         trades, missed = backtester.run_strategy(run_cfg)
         backtester.generate_and_print_report(f"{folder_name} - NFE 1H/15m 雙級別戰法", trades, missed)
-        backtester.save_results_to_files(trades, missed, f"nfe_backtest_report_{folder_name}")
+        backtester.save_results_to_files(
+            trades,
+            missed,
+            report_prefix or f"nfe_backtest_report_{folder_name}",
+        )
         
     except Exception as e:
         import traceback

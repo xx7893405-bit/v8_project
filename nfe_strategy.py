@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -19,6 +19,8 @@ class NFEDoubleLevelStrategy:
         ob_range_type: str = "full",
         min_rr: float = 5.0,
         sl_padding: float = 20.0,
+        max_short_rr: Optional[float] = None,
+        max_short_stop_atr: Optional[float] = None,
     ):
         self.htf = htf
         self.ltf = ltf
@@ -27,6 +29,8 @@ class NFEDoubleLevelStrategy:
         self.ob_range_type = ob_range_type
         self.min_rr = min_rr
         self.sl_padding = sl_padding
+        self.max_short_rr = max_short_rr
+        self.max_short_stop_atr = max_short_stop_atr
         self.precomputed_htf_df = None
 
     def signal_timeframe(self) -> str:
@@ -407,6 +411,23 @@ class NFEDoubleLevelStrategy:
                                     net_sl_dist,
                                 )
                                 if order is not None:
+                                    atr = float(prev["ATR_14"])
+                                    stop_atr = abs(order["sl"] - order["entry_price"]) / atr if atr > 0 else float("inf")
+                                    if (
+                                        (self.max_short_rr is not None and order["rr_potential"] > self.max_short_rr)
+                                        or (self.max_short_stop_atr is not None and stop_atr > self.max_short_stop_atr)
+                                    ):
+                                        return StrategyDecision(
+                                            missed=[
+                                                backtester._record_missed(
+                                                    "SHORT",
+                                                    curr_time,
+                                                    "SHORT_QUALITY_FILTER",
+                                                    rr=order["rr_potential"],
+                                                    stop_atr=stop_atr,
+                                                )
+                                            ]
+                                        )
                                     order["entry_mode"] = "NFE_DL_SHORT"
                                     return StrategyDecision(retrace_order=order)
                                 if miss is not None:
