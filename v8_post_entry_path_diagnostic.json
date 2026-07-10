@@ -1,0 +1,88 @@
+[
+  {
+    "side": "LONG",
+    "trade_count": 67,
+    "result_counts": {
+      "STOP_LOSS": 35,
+      "TAKE_PROFIT_ALL": 20,
+      "TIME_STOP": 12
+    },
+    "checkpoints": {
+      "bar_1": {
+        "avg_mfe_r": 0.1426,
+        "avg_mae_r": 0.1949,
+        "avg_close_move_r": -0.0259,
+        "pct_close_positive": 38.81,
+        "pct_mfe_ge_1r": 1.49,
+        "pct_mae_ge_1r": 2.99
+      },
+      "bar_4": {
+        "avg_mfe_r": 0.3407,
+        "avg_mae_r": 0.4143,
+        "avg_close_move_r": -0.0533,
+        "pct_close_positive": 43.28,
+        "pct_mfe_ge_1r": 7.46,
+        "pct_mae_ge_1r": 4.48
+      },
+      "bar_8": {
+        "avg_mfe_r": 0.5083,
+        "avg_mae_r": 0.5744,
+        "avg_close_move_r": -0.0697,
+        "pct_close_positive": 43.28,
+        "pct_mfe_ge_1r": 14.93,
+        "pct_mae_ge_1r": 14.93
+      },
+      "bar_12": {
+        "avg_mfe_r": 0.6603,
+        "avg_mae_r": 0.715,
+        "avg_close_move_r": -0.0087,
+        "pct_close_positive": 53.73,
+        "pct_mfe_ge_1r": 19.4,
+        "pct_mae_ge_1r": 25.37
+      }
+    }
+  },
+  {
+    "side": "SHORT",
+    "trade_count": 29,
+    "result_counts": {
+      "STOP_LOSS": 15,
+      "TAKE_PROFIT_ALL": 10,
+      "TIME_STOP": 4
+    },
+    "checkpoints": {
+      "bar_1": {
+        "avg_mfe_r": 0.1996,
+        "avg_mae_r": 0.2368,
+        "avg_close_move_r": -0.0481,
+        "pct_close_positive": 51.72,
+        "pct_mfe_ge_1r": 0.0,
+        "pct_mae_ge_1r": 0.0
+      },
+      "bar_4": {
+        "avg_mfe_r": 0.4392,
+        "avg_mae_r": 0.383,
+        "avg_close_move_r": 0.0013,
+        "pct_close_positive": 55.17,
+        "pct_mfe_ge_1r": 6.9,
+        "pct_mae_ge_1r": 6.9
+      },
+      "bar_8": {
+        "avg_mfe_r": 0.778,
+        "avg_mae_r": 0.5266,
+        "avg_close_move_r": 0.0678,
+        "pct_close_positive": 41.38,
+        "pct_mfe_ge_1r": 13.79,
+        "pct_mae_ge_1r": 13.79
+      },
+      "bar_12": {
+        "avg_mfe_r": 0.8966,
+        "avg_mae_r": 0.6985,
+        "avg_close_move_r": -0.0322,
+        "pct_close_positive": 48.28,
+        "pct_mfe_ge_1r": 20.69,
+        "pct_mae_ge_1r": 24.14
+      }
+    }
+  }
+]
