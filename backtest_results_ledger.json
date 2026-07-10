@@ -1,0 +1,58 @@
+[
+    {
+        "strategy_version": "NFE_V4_Adaptive",
+        "dataset": "202101-202607_merged",
+        "sizing_mode": "fixed_margin",
+        "parameters": {
+            "fixed_margin_usd": 1000.0,
+            "leverage": 1.0
+        },
+        "metrics": {
+            "profit_pct": 0.9530326971177419,
+            "max_drawdown_pct": 0.37118337981068056,
+            "total_trades": 82
+        }
+    },
+    {
+        "strategy_version": "NFE_V4_Adaptive",
+        "dataset": "202101-202607_merged",
+        "sizing_mode": "fixed_margin",
+        "parameters": {
+            "fixed_margin_usd": 1000.0,
+            "leverage": 2.0
+        },
+        "metrics": {
+            "profit_pct": 1.9060653942368662,
+            "max_drawdown_pct": 0.7358356752128304,
+            "total_trades": 82
+        }
+    },
+    {
+        "strategy_version": "NFE_V4_Adaptive",
+        "dataset": "202101-202607_merged",
+        "sizing_mode": "fixed_margin",
+        "parameters": {
+            "fixed_margin_usd": 1000.0,
+            "leverage": 3.0
+        },
+        "metrics": {
+            "profit_pct": 2.859098091354663,
+            "max_drawdown_pct": 1.0941277575631692,
+            "total_trades": 82
+        }
+    },
+    {
+        "strategy_version": "NFE_V4_Adaptive",
+        "dataset": "202101-202607_merged",
+        "sizing_mode": "fixed_margin",
+        "parameters": {
+            "fixed_margin_usd": 1000.0,
+            "leverage": 5.0
+        },
+        "metrics": {
+            "profit_pct": 4.765163485591475,
+            "max_drawdown_pct": 1.7922854763090463,
+            "total_trades": 82
+        }
+    }
+]
