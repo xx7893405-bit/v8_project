@@ -11,6 +11,7 @@ from oracle_strategy_job import (
     build_strategy,
     classify_decision,
     load_or_create_forward_start,
+    load_or_create_forward_run,
     load_resume_snapshot,
     parse_args,
     strategy_events,
@@ -50,6 +51,15 @@ class OracleStrategyJobTest(unittest.TestCase):
             actual = load_or_create_forward_start(path, "2026-07-01T00:00:00Z")
             self.assertEqual(actual, "2026-07-01T00:00:00+00:00")
 
+    def test_forward_run_id_is_stable_until_the_start_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "start.json"
+            start, first_run = load_or_create_forward_run(path, "2026-07-01T00:00:00Z")
+            self.assertEqual(load_or_create_forward_run(path, "2026-07-01T00:00:00Z"), (start, first_run))
+            self.assertNotEqual(
+                load_or_create_forward_run(path, "2026-07-02T00:00:00Z")[1], first_run
+            )
+
     def test_resume_requires_matching_start(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
@@ -68,6 +78,7 @@ class OracleStrategyJobTest(unittest.TestCase):
     def test_events_are_emitted_once(self):
         payload = {
             "evaluated_at": "2026-07-11T02:30:00+00:00",
+            "run_id": "test-run",
             "strategy": "nfe-v2",
             "decision": "LONG",
             "snapshot": {"as_of": "2026-07-11 02:15:00", "balance": 10000, "active_position": {"type": "LONG", "entry_time": "2026-07-11 02:15:00"}, "trades": []},
@@ -76,6 +87,7 @@ class OracleStrategyJobTest(unittest.TestCase):
             path = Path(directory) / "events.jsonl"
             events = strategy_events(payload, path)
             self.assertEqual(events[0]["event_type"], "ENTRY")
+            self.assertEqual(events[0]["event_id"].split(":")[0], "test-run")
             path.write_text(__import__("json").dumps(events[0]) + "\n", encoding="utf-8")
             self.assertEqual(strategy_events(payload, path), [])
 
