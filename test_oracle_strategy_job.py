@@ -35,6 +35,10 @@ class OracleStrategyJobTest(unittest.TestCase):
         with patch.object(sys, "argv", ["oracle_strategy_job.py"]):
             self.assertEqual(parse_args().risk_pct, 0.05)
 
+    def test_account_id_is_configurable(self):
+        with patch.object(sys, "argv", ["oracle_strategy_job.py", "--account-id", "paper-002"]):
+            self.assertEqual(parse_args().account_id, "paper-002")
+
     def test_max_leverage_is_configurable(self):
         with patch.object(sys, "argv", ["oracle_strategy_job.py", "--max-leverage", "1000"]):
             self.assertEqual(parse_args().max_leverage, 1000.0)
@@ -79,6 +83,7 @@ class OracleStrategyJobTest(unittest.TestCase):
         payload = {
             "evaluated_at": "2026-07-11T02:30:00+00:00",
             "run_id": "test-run",
+            "account_id": "paper-nfe-v2",
             "strategy": "nfe-v2",
             "decision": "LONG",
             "snapshot": {"as_of": "2026-07-11 02:15:00", "balance": 10000, "active_position": {"type": "LONG", "entry_time": "2026-07-11 02:15:00"}, "trades": []},
@@ -87,6 +92,7 @@ class OracleStrategyJobTest(unittest.TestCase):
             path = Path(directory) / "events.jsonl"
             events = strategy_events(payload, path)
             self.assertEqual(events[0]["event_type"], "ENTRY")
+            self.assertEqual(events[0]["account_id"], "paper-nfe-v2")
             self.assertEqual(events[0]["event_id"].split(":")[0], "test-run")
             path.write_text(__import__("json").dumps(events[0]) + "\n", encoding="utf-8")
             self.assertEqual(strategy_events(payload, path), [])

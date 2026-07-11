@@ -1,5 +1,5 @@
 [Unit]
-Description=Market sync and strategy backtest evaluation
+Description=Paper account paper-nfe-v2 running NFE V2
 Wants=network-online.target
 After=network-online.target
 
@@ -9,10 +9,11 @@ User=ubuntu
 WorkingDirectory=/opt/v8_project
 Environment=PYTHONUNBUFFERED=1
 Environment=STRATEGY=nfe-v2
+Environment=ACCOUNT_ID=paper-nfe-v2
 Environment=RISK_PCT=0.05
 Environment=MAX_LEVERAGE=1000
 Environment=START_AT=2026-07-01T00:00:00Z
-ExecStart=/opt/v8_project/.venv/bin/python oracle_strategy_job.py --strategy ${STRATEGY} --risk-pct ${RISK_PCT} --max-leverage ${MAX_LEVERAGE} --start-at ${START_AT}
+ExecStart=/opt/v8_project/.venv/bin/python oracle_strategy_job.py --account-id ${ACCOUNT_ID} --strategy ${STRATEGY} --risk-pct ${RISK_PCT} --max-leverage ${MAX_LEVERAGE} --start-at ${START_AT} --state-path runtime/accounts/${ACCOUNT_ID}/state.json --forward-start-path runtime/accounts/${ACCOUNT_ID}/forward_start.json --events-path runtime/accounts/${ACCOUNT_ID}/events.jsonl
 TimeoutStartSec=12min
 Nice=10
 IOSchedulingClass=idle

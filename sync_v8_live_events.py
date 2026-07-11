@@ -12,14 +12,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 RUNTIME = ROOT / "runtime"
 FIELDS = [
-    "event_id", "run_id", "event_type", "detected_at", "evaluated_at", "as_of", "strategy",
+    "event_id", "run_id", "account_id", "event_type", "detected_at", "evaluated_at", "as_of", "strategy",
     "decision", "type", "entry_time", "exit_time", "result", "pnl", "pnl_pct",
     "entry_price", "exit_price", "sl", "tp1", "tp2", "size", "entry_balance",
     "fee", "leverage", "entry_mode", "exit_model", "balance",
 ]
 EVENT_FILES = {
-    "v2": "oracle_strategy_events.jsonl",
-    "v4": "v4_strategy_events.jsonl",
+    "paper-nfe-v2": "accounts/paper-nfe-v2/events.jsonl",
+    "paper-nfe-v4": "accounts/paper-nfe-v4/events.jsonl",
 }
 
 

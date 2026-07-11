@@ -1,12 +1,12 @@
 [Unit]
-Description=Evaluate V4 every 15 minutes after V2 finishes
+Description=Evaluate paper-nfe-v4 every 15 minutes after paper-nfe-v2
 
 [Timer]
 OnCalendar=*-*-* *:02,17,32,47:08 UTC
 Persistent=true
 RandomizedDelaySec=20
 AccuracySec=1s
-Unit=v4-strategy.service
+Unit=nfe-v4-strategy.service
 
 [Install]
 WantedBy=timers.target

@@ -1,0 +1,24 @@
+[Unit]
+Description=Paper account paper-nfe-v4 running NFE V4
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/v8_project
+Environment=PYTHONUNBUFFERED=1
+Environment=ACCOUNT_ID=paper-nfe-v4
+ExecStart=/opt/v8_project/.venv/bin/python oracle_strategy_job.py --account-id ${ACCOUNT_ID} --strategy nfe-v4 --risk-pct 0.05 --max-leverage 1000 --start-at 2026-07-01T00:00:00Z --state-path runtime/accounts/${ACCOUNT_ID}/state.json --forward-start-path runtime/accounts/${ACCOUNT_ID}/forward_start.json --events-path runtime/accounts/${ACCOUNT_ID}/events.jsonl
+TimeoutStartSec=12min
+Nice=10
+IOSchedulingClass=idle
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/v8_project/data /opt/v8_project/runtime
+
+[Install]
+WantedBy=multi-user.target

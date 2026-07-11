@@ -1,12 +1,12 @@
 [Unit]
-Description=Evaluate the configured strategy every 15 minutes
+Description=Evaluate paper-nfe-v2 every 15 minutes
 
 [Timer]
 OnCalendar=*-*-* *:00,15,30,45:08 UTC
 Persistent=true
 RandomizedDelaySec=20
 AccuracySec=1s
-Unit=v8-strategy.service
+Unit=nfe-v2-strategy.service
 
 [Install]
 WantedBy=timers.target
