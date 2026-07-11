@@ -174,8 +174,8 @@ def main() -> None:
     args = parse_args()
     if not 0 < args.risk_pct <= 1:
         raise ValueError("risk-pct must be greater than 0 and no greater than 1")
-    if not 1 <= args.max_leverage <= 20:
-        raise ValueError("max-leverage must be between 1 and 20")
+    if not 1 <= args.max_leverage <= 1000:
+        raise ValueError("max-leverage must be between 1 and 1000")
     sync = CcxtOHLCVSync(
         CcxtSyncConfig(
             exchange=args.exchange,

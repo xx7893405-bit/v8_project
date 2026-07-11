@@ -47,7 +47,7 @@ sudo systemctl enable --now v8-strategy.timer
 systemctl list-timers v8-strategy.timer
 ```
 
-正式排程由 `deploy/oracle/v8-strategy.service` 內的 `STRATEGY=nfe-v2`、`RISK_PCT=0.05`、`MAX_LEVERAGE=20`、`START_AT=2026-07-01T00:00:00Z` 決定。槓桿是上限，系統只在窄止損需要時使用，並以實際名目部位記錄有效槓桿；更改後，重新複製 service 並執行 `sudo systemctl daemon-reload`。
+正式排程由 `deploy/oracle/v8-strategy.service` 內的 `STRATEGY=nfe-v2`、`RISK_PCT=0.05`、`MAX_LEVERAGE=1000`、`START_AT=2026-07-01T00:00:00Z` 決定。此 1000x 僅適用於紙上模擬，等同不以槓桿上限截斷倉位；仍會記錄有效槓桿與模擬強平價。更改後，重新複製 service 並執行 `sudo systemctl daemon-reload`。
 
 查看執行結果與日誌：
 

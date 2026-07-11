@@ -35,8 +35,8 @@ class OracleStrategyJobTest(unittest.TestCase):
             self.assertEqual(parse_args().risk_pct, 0.05)
 
     def test_max_leverage_is_configurable(self):
-        with patch.object(sys, "argv", ["oracle_strategy_job.py", "--max-leverage", "20"]):
-            self.assertEqual(parse_args().max_leverage, 20.0)
+        with patch.object(sys, "argv", ["oracle_strategy_job.py", "--max-leverage", "1000"]):
+            self.assertEqual(parse_args().max_leverage, 1000.0)
 
     def test_forward_start_is_stable(self):
         with tempfile.TemporaryDirectory() as directory:
