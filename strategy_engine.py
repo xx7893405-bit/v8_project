@@ -383,6 +383,11 @@ class MultiTimeframeBacktester:
             return 0.0
         return min(size, self._max_notional_for_balance(balance) / entry_price)
 
+    def _effective_leverage(self, notional: float, balance: float) -> float:
+        if balance <= 0:
+            return 1.0
+        return min(max(self.config.leverage, 1.0), max(1.0, notional / balance))
+
     def _update_position_margin_state(self, active_pos: dict) -> None:
         leverage = max(float(active_pos.get("leverage", self.config.leverage)), 1.0)
         if leverage <= 1.0:
@@ -704,7 +709,7 @@ class MultiTimeframeBacktester:
                 "position_sizing_mode": self.config.position_sizing_mode,
                 "target_notional_usd": target_notional_usd,
                 "actual_notional_usd": size * market_entry_p,
-                "leverage": self.config.leverage,
+                "leverage": self._effective_leverage(size * market_entry_p, balance),
             }
             self._update_position_margin_state(position)
             return position, None
@@ -1080,7 +1085,7 @@ class MultiTimeframeBacktester:
                 "position_sizing_mode": self.config.position_sizing_mode,
                 "target_notional_usd": target_notional_usd,
                 "actual_notional_usd": size * effective_entry_price,
-                "leverage": self.config.leverage,
+                "leverage": self._effective_leverage(size * effective_entry_price, balance),
             }
             self._update_position_margin_state(order)
             return order, None

@@ -32,6 +32,12 @@ class BacktestTemporalSafetyTest(unittest.TestCase):
         engine.config = BacktestConfig(leverage=1.0)
         self.assertEqual(engine._cap_size_by_leverage(2.0, 100.0, 100.0), 1.0)
 
+    def test_effective_leverage_never_exceeds_the_cap(self):
+        engine = object.__new__(MultiTimeframeBacktester)
+        engine.config = BacktestConfig(leverage=20.0)
+        self.assertEqual(engine._effective_leverage(80_000.0, 10_000.0), 8.0)
+        self.assertEqual(engine._effective_leverage(250_000.0, 10_000.0), 20.0)
+
     def test_signal_bar_end_matches_strategy_timeframe(self):
         engine = object.__new__(MultiTimeframeBacktester)
         engine.strategy = NFEDoubleLevelStrategy(ltf="15m")

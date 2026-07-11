@@ -28,6 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--database", default="data/market_data.duckdb")
     parser.add_argument("--lookback-days", type=int, default=45)
     parser.add_argument("--risk-pct", type=float, default=0.05)
+    parser.add_argument("--max-leverage", type=float, default=1.0)
     parser.add_argument(
         "--strategy",
         choices=["nfe", "nfe-v2", "nfe-v4", "v8"],
@@ -173,6 +174,8 @@ def main() -> None:
     args = parse_args()
     if not 0 < args.risk_pct <= 1:
         raise ValueError("risk-pct must be greater than 0 and no greater than 1")
+    if not 1 <= args.max_leverage <= 20:
+        raise ValueError("max-leverage must be between 1 and 20")
     sync = CcxtOHLCVSync(
         CcxtSyncConfig(
             exchange=args.exchange,
@@ -201,6 +204,7 @@ def main() -> None:
         initial_balance=10000.0,
         risk_pct=args.risk_pct,
         position_sizing_mode="risk_based",
+        leverage=args.max_leverage,
         maker_fee=0.0002,
         taker_fee=0.0005,
         max_holding_bars=96,
@@ -235,6 +239,7 @@ def main() -> None:
         },
         "strategy": args.strategy,
         "risk_pct": args.risk_pct,
+        "max_leverage": args.max_leverage,
         "forward_start": forward_start,
         "synchronized_rows": synchronized_rows,
         "processed_new_signal_bars": (

@@ -10,8 +10,9 @@ WorkingDirectory=/opt/v8_project
 Environment=PYTHONUNBUFFERED=1
 Environment=STRATEGY=nfe-v2
 Environment=RISK_PCT=0.05
+Environment=MAX_LEVERAGE=20
 Environment=START_AT=2026-07-01T00:00:00Z
-ExecStart=/opt/v8_project/.venv/bin/python oracle_strategy_job.py --strategy ${STRATEGY} --risk-pct ${RISK_PCT} --start-at ${START_AT}
+ExecStart=/opt/v8_project/.venv/bin/python oracle_strategy_job.py --strategy ${STRATEGY} --risk-pct ${RISK_PCT} --max-leverage ${MAX_LEVERAGE} --start-at ${START_AT}
 TimeoutStartSec=12min
 Nice=10
 IOSchedulingClass=idle
