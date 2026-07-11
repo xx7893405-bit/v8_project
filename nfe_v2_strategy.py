@@ -209,7 +209,7 @@ class NFEV2Strategy(NFEDoubleLevelStrategy):
 
         return StrategyDecision()
 
-    def before_manage_position(self, active_position, backtester, curr_time):
+    def after_manage_position(self, active_position, backtester, curr_time):
         if self.use_trailing_stop:
             self._update_trailing_stop(active_position, backtester, curr_time)
 

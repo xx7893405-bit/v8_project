@@ -376,8 +376,6 @@ class MultiTimeframeBacktester:
 
     def _max_notional_for_balance(self, balance: float) -> float:
         leverage = max(self.config.leverage, 1.0)
-        if leverage <= 1.0:
-            return float("inf")
         return max(0.0, balance * leverage)
 
     def _cap_size_by_leverage(self, size: float, entry_price: float, balance: float) -> float:
@@ -509,7 +507,11 @@ class MultiTimeframeBacktester:
         if not getattr(self, "has_micro_data", False):
             return "NONE"
 
-        m1_slice = self.data_feed.load_micro_window(start_time, end_time, M1_COLUMNS)
+        if end_time <= start_time:
+            return "NONE"
+        m1_slice = self.data_feed.load_micro_window(
+            start_time, end_time - pd.Timedelta(nanoseconds=1), M1_COLUMNS
+        )
         if m1_slice.empty:
             return "NONE"
         for _, row in m1_slice.iterrows():
@@ -726,7 +728,7 @@ class MultiTimeframeBacktester:
         self,
         active_position: dict,
         curr_time: pd.Timestamp,
-        prev_time: pd.Timestamp,
+        bar_end_time: pd.Timestamp,
         balance: float,
         trades: List[dict],
         is_liq_hit: bool,
@@ -743,7 +745,7 @@ class MultiTimeframeBacktester:
         tp2 = active_position["tp2"]
 
         if is_liq_hit and is_tp1_hit_now:
-            seq = self._check_1m_sequence(prev_time, curr_time, liquidation_price, tp1, a_is_low=a_is_low, b_is_high=b_is_high)
+            seq = self._check_1m_sequence(curr_time, bar_end_time, liquidation_price, tp1, a_is_low=a_is_low, b_is_high=b_is_high)
             if seq == "B":
                 active_position["tp1_hit"] = True
                 if is_tp2_hit_now:
@@ -768,7 +770,7 @@ class MultiTimeframeBacktester:
             return None, balance
 
         if is_sl_hit and is_tp1_hit_now:
-            seq = self._check_1m_sequence(prev_time, curr_time, current_sl, tp1, a_is_low=a_is_low, b_is_high=b_is_high)
+            seq = self._check_1m_sequence(curr_time, bar_end_time, current_sl, tp1, a_is_low=a_is_low, b_is_high=b_is_high)
             if seq == "B":
                 active_position["tp1_hit"] = True
                 if is_tp2_hit_now:
@@ -817,7 +819,7 @@ class MultiTimeframeBacktester:
         active_position: dict,
         curr: pd.Series,
         curr_time: pd.Timestamp,
-        prev_time: pd.Timestamp,
+        bar_end_time: pd.Timestamp,
         loop_index: int,
         balance: float,
         trades: List[dict],
@@ -849,20 +851,17 @@ class MultiTimeframeBacktester:
 
         be_trigger_p = entry_price + (tp1 - entry_price) * cfg.be_trigger_ratio if pos_type == "LONG" else entry_price - (entry_price - tp1) * cfg.be_trigger_ratio
         is_be_trigger_hit = (curr["high"] >= be_trigger_p) if pos_type == "LONG" else (curr["low"] <= be_trigger_p)
-        if cfg.enable_be and is_be_trigger_hit and not be_active:
-            active_position["be_active"] = True
-            active_position["sl"] = entry_price
-            current_sl = entry_price
+        activate_be_after_bar = cfg.enable_be and is_be_trigger_hit and not be_active
 
         if pos_type == "LONG":
             is_liq_hit = use_liquidation and curr["low"] <= liquidation_price
             is_sl_hit = curr["low"] <= current_sl
             is_tp1_hit_now = (not tp1_hit) and (curr["high"] >= tp1)
             is_tp2_hit_now = curr["high"] >= tp2
-            return self._resolve_position_event(
+            position, balance = self._resolve_position_event(
                 active_position,
                 curr_time,
-                prev_time,
+                bar_end_time,
                 balance,
                 trades,
                 is_liq_hit,
@@ -875,15 +874,19 @@ class MultiTimeframeBacktester:
                 a_is_low=True,
                 b_is_high=True,
             )
+            if position is not None and activate_be_after_bar:
+                position["be_active"] = True
+                position["sl"] = entry_price
+            return position, balance
 
         is_liq_hit = use_liquidation and curr["high"] >= liquidation_price
         is_sl_hit = curr["high"] >= current_sl
         is_tp1_hit_now = (not tp1_hit) and (curr["low"] <= tp1)
         is_tp2_hit_now = curr["low"] <= tp2
-        return self._resolve_position_event(
+        position, balance = self._resolve_position_event(
             active_position,
             curr_time,
-            prev_time,
+            bar_end_time,
             balance,
             trades,
             is_liq_hit,
@@ -896,6 +899,14 @@ class MultiTimeframeBacktester:
             a_is_low=False,
             b_is_high=True,
         )
+        if position is not None and activate_be_after_bar:
+            position["be_active"] = True
+            position["sl"] = entry_price
+        return position, balance
+
+    def _signal_bar_end_time(self, start_time: pd.Timestamp) -> pd.Timestamp:
+        signal_timeframe = getattr(self.strategy, "signal_timeframe", lambda: "15m")()
+        return start_time + pd.Timedelta(signal_timeframe)
 
     def _handle_pending_retest_order(
         self,
@@ -1120,7 +1131,7 @@ class MultiTimeframeBacktester:
             curr = df.iloc[i]
             execution_curr = self._execution_bar(curr)
             curr_time = df.index[i]
-            prev_time = df.index[i - 1]
+            bar_end_time = self._signal_bar_end_time(curr_time)
 
             if active_position is None and pending_breakout_order is not None and i > pending_breakout_order["created_idx"]:
                 position, missed = self._build_breakout_position(pending_breakout_order, execution_curr, curr_time, balance, cfg)
@@ -1132,12 +1143,12 @@ class MultiTimeframeBacktester:
                 pending_breakout_order = None
 
             if active_position is not None:
-                before_manage = getattr(self.strategy, "before_manage_position", None)
-                if callable(before_manage):
-                    before_manage(active_position, self, curr_time)
-                active_position, balance = self._manage_active_position(active_position, execution_curr, curr_time, prev_time, i, balance, trades, cfg)
+                active_position, balance = self._manage_active_position(active_position, execution_curr, curr_time, bar_end_time, i, balance, trades, cfg)
                 if active_position is None:
                     continue
+                after_manage = getattr(self.strategy, "after_manage_position", None)
+                if callable(after_manage):
+                    after_manage(active_position, self, curr_time)
 
             pending_retest_order, active_position, balance = self._handle_pending_retest_order(
                 pending_retest_order,
