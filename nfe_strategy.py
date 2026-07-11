@@ -187,6 +187,7 @@ class NFEDoubleLevelStrategy:
         df_res["htf_short_ob_low"] = htf_short_ob_low
         df_res["htf_target_low"] = htf_target_low
 
+        df_res.index = df_res.index + pd.Timedelta(self.htf)
         return df_res
 
     def _find_recent_swings_from_slice(
