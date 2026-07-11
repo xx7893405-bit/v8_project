@@ -1086,20 +1086,36 @@ class MultiTimeframeBacktester:
             rr=math_rr,
         )
 
-    def run_session(self, force_close_at_end: bool = True, **kwargs: object) -> BacktestSessionResult:
+    def run_session(
+        self,
+        force_close_at_end: bool = True,
+        start_at: Optional[pd.Timestamp] = None,
+        resume_snapshot: Optional[dict] = None,
+        **kwargs: object,
+    ) -> BacktestSessionResult:
         cfg = RunConfig(**kwargs)
         self._validate_run_config(cfg)
 
-        balance = self.initial_balance
-        trades: List[dict] = []
-        missed_trades: List[dict] = []
+        resume_snapshot = resume_snapshot or {}
+        balance = float(resume_snapshot.get("balance", self.initial_balance))
+        trades: List[dict] = list(resume_snapshot.get("trades", []))
+        missed_trades: List[dict] = list(resume_snapshot.get("missed_trades", []))
         df = self._get_signal_frame()
-        active_position: Optional[dict] = None
-        pending_retest_order: Optional[dict] = None
-        pending_breakout_order: Optional[dict] = None
+        active_position: Optional[dict] = resume_snapshot.get("active_position")
+        pending_retest_order: Optional[dict] = resume_snapshot.get("pending_retest_order")
+        pending_breakout_order: Optional[dict] = resume_snapshot.get("pending_breakout_order")
         lookback = 96
 
-        for i in range(lookback, len(df)):
+        start_index = lookback
+        if resume_snapshot.get("as_of") is not None:
+            start_index = max(
+                start_index,
+                int(df.index.searchsorted(pd.Timestamp(resume_snapshot["as_of"]), side="right")),
+            )
+        elif start_at is not None:
+            start_index = max(start_index, int(df.index.searchsorted(pd.Timestamp(start_at))))
+
+        for i in range(start_index, len(df)):
             prev = df.iloc[i - 1]
             curr = df.iloc[i]
             execution_curr = self._execution_bar(curr)
@@ -1116,6 +1132,9 @@ class MultiTimeframeBacktester:
                 pending_breakout_order = None
 
             if active_position is not None:
+                before_manage = getattr(self.strategy, "before_manage_position", None)
+                if callable(before_manage):
+                    before_manage(active_position, self, curr_time)
                 active_position, balance = self._manage_active_position(active_position, execution_curr, curr_time, prev_time, i, balance, trades, cfg)
                 if active_position is None:
                     continue
@@ -1160,9 +1179,19 @@ class MultiTimeframeBacktester:
         session = self.run_session(force_close_at_end=True, **kwargs)
         return session.trades, session.missed_trades
 
-    def build_runtime_snapshot(self, strategy: StrategyConfig) -> dict:
+    def build_runtime_snapshot(
+        self,
+        strategy: StrategyConfig,
+        start_at: Optional[pd.Timestamp] = None,
+        resume_snapshot: Optional[dict] = None,
+    ) -> dict:
         self.config = strategy.to_backtest_config()
-        session = self.run_session(force_close_at_end=False, **strategy.to_run_config().__dict__)
+        session = self.run_session(
+            force_close_at_end=False,
+            start_at=start_at,
+            resume_snapshot=resume_snapshot,
+            **strategy.to_run_config().__dict__,
+        )
         latest_time = None
         signal_df = self._get_signal_frame()
         if not signal_df.empty:
@@ -1179,6 +1208,8 @@ class MultiTimeframeBacktester:
             "latest_missed": self._json_ready(latest_missed) if latest_missed is not None else None,
             "trade_count": len(session.trades),
             "missed_count": len(session.missed_trades),
+            "trades": [self._json_ready(trade) for trade in session.trades],
+            "missed_trades": [self._json_ready(miss) for miss in session.missed_trades],
         }
 
     def analyze_results(self, trades: Sequence[dict]) -> dict:

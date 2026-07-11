@@ -44,6 +44,8 @@ env/
 *.duckdb.wal
 *_report_*.json
 *_diagnostic.json
+runtime/v8_live_*
+deploy/macos/ssh-key-*.key
 202407-2507/
 202507-2607/
 202407-2607_continuous/

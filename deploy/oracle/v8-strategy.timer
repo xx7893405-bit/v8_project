@@ -1,5 +1,5 @@
 [Unit]
-Description=Evaluate the V8 strategy every 15 minutes
+Description=Evaluate the configured strategy every 15 minutes
 
 [Timer]
 OnCalendar=*-*-* *:00,15,30,45:08 UTC

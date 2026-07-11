@@ -38,18 +38,6 @@ class NFEV2Strategy(NFEDoubleLevelStrategy):
         balance: float,
         cfg: RunConfig,
     ) -> StrategyDecision:
-        # 在初次呼叫時，對 backtester 進行猴子補丁，插入結構性移動止損邏輯
-        if self.use_trailing_stop and not hasattr(backtester, "_manage_active_position_patched"):
-            original_manage = backtester._manage_active_position
-            
-            def patched_manage(active_position, curr_series, curr_time_val, prev_time_val, loop_index, current_balance, trades_list, run_cfg):
-                # 在執行原本的止損/止盈判斷前，先更新移動止損
-                self._update_trailing_stop(active_position, backtester, curr_time_val)
-                return original_manage(active_position, curr_series, curr_time_val, prev_time_val, loop_index, current_balance, trades_list, run_cfg)
-                
-            backtester._manage_active_position = patched_manage
-            backtester._manage_active_position_patched = True
-
         if self.precomputed_htf_df is None:
             if self.htf == "1h":
                 df_htf = backtester.df_1h
@@ -220,6 +208,10 @@ class NFEV2Strategy(NFEDoubleLevelStrategy):
                                     return StrategyDecision(missed=[miss])
 
         return StrategyDecision()
+
+    def before_manage_position(self, active_position, backtester, curr_time):
+        if self.use_trailing_stop:
+            self._update_trailing_stop(active_position, backtester, curr_time)
 
     def _update_trailing_stop(self, active_position: dict, backtester, curr_time: pd.Timestamp):
         """

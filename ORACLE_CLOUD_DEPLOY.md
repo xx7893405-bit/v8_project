@@ -1,6 +1,6 @@
 # Oracle Cloud Always Free 部署
 
-這個部署使用一台 Ubuntu Ampere A1 VM 與 `systemd timer`。每 15 分鐘會抓取已收盤的 1m K 線、更新 DuckDB、執行 NFE 雙級別策略，並原子更新 `runtime/oracle_strategy_state.json`。
+這個部署使用一台 Ubuntu VM 與 `systemd timer`。首次從固定起點建立 10,000 USDT forward-test 狀態；之後每 15 分鐘抓取所有尚未同步且已收盤的 1m K 線，只處理新的完整訊號 K 線，並接續保存餘額、持倉、掛單及交易。`as_of` 保證同一根 K 線不會重複入帳；手動重跑但沒有新 K 線時只會同步資料，不會改變績效。預設策略是 NFE V2，也可切換成 NFE V1 或 V8。
 
 > 這是策略觀察與紙上判定，不會送出真實交易委託。上線交易前仍需另外處理 API 金鑰、風控、冪等委託與告警。
 
@@ -27,8 +27,14 @@ mkdir -p data runtime
 
 ```bash
 cd /opt/v8_project
-.venv/bin/python oracle_strategy_job.py
+.venv/bin/python oracle_strategy_job.py --strategy nfe-v2 --risk-pct 0.05
 jq . runtime/oracle_strategy_state.json
+```
+
+可用策略為 `nfe-v2`（預設）、`nfe`、`v8`。例如測試原始 NFE：
+
+```bash
+.venv/bin/python oracle_strategy_job.py --strategy nfe
 ```
 
 ## 3. 啟用 15 分鐘排程
@@ -40,6 +46,8 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now v8-strategy.timer
 systemctl list-timers v8-strategy.timer
 ```
+
+正式排程由 `deploy/oracle/v8-strategy.service` 內的 `STRATEGY=nfe-v2`、`RISK_PCT=0.05`、`START_AT=2026-07-01T00:00:00Z` 決定；更改後，重新複製 service 並執行 `sudo systemctl daemon-reload`。
 
 查看執行結果與日誌：
 
@@ -60,7 +68,8 @@ sudo systemctl start v8-strategy.service
 
 ## 維運重點
 
-- DuckDB 留在 Block Volume，重開機後資料仍在；同步器會重抓最後 5 分鐘並用主鍵覆寫。
+- DuckDB 留在 Block Volume，重開機後資料仍在；首次預設回補 45 天，之後每次只抓尚未同步的 1m K 線（並重抓最後 5 分鐘，以主鍵覆寫）。
+- `runtime/oracle_forward_start.json` 固定 forward-test 起點；`runtime/oracle_strategy_state.json` 是累積帳戶狀態。只有要建立全新的 10,000 USDT 測試時才刪除兩者。
 - timer 使用 `Persistent=true`，VM 停機期間錯過排程，開機後會補跑一次。
 - service 最長執行 12 分鐘；避免前一輪卡住撞上下一個 15 分鐘週期。systemd 不會同時啟動同一 service。
 - `ProtectSystem=strict` 限制寫入範圍。若 VM 使用者不是 `ubuntu` 或專案路徑不同，必須同步修改 service 的 `User`、`WorkingDirectory`、`ExecStart` 和 `ReadWritePaths`。
