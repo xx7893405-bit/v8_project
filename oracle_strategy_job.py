@@ -108,6 +108,7 @@ def publish_status(payload: dict) -> None:
     url, token = os.getenv("STATUS_PUSH_URL"), os.getenv("STATUS_PUSH_TOKEN")
     site_token = os.getenv("STATUS_SITE_TOKEN")
     if not url or not token or not site_token:
+        print("warning: status push skipped; missing STATUS_PUSH_URL, STATUS_PUSH_TOKEN, or STATUS_SITE_TOKEN")
         return
     request = urllib.request.Request(
         url, json.dumps(payload).encode(), method="POST",

@@ -1,5 +1,6 @@
 {
   "account_id": "paper-v4-portfolio",
+  "account_name": "NFE V4 多幣種帳戶",
   "account_balance": 1000,
   "exchange": "binance",
   "risk_pct": 0.05,
