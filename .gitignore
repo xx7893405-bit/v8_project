@@ -45,6 +45,16 @@ env/
 *_report_*.json
 *_diagnostic.json
 runtime/v8_live_*
+reports/
+.tokensave/
+venv/
+node_modules/
+dist/
+*.xlsx
+*.inspect.ndjson
+*_trades.json
+*_missed.json
+strategy-monitor-site/
 deploy/macos/ssh-key-*.key
 202407-2507/
 202507-2607/

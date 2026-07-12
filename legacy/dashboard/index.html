@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>V8 Strategy Monitor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div><span class="eyebrow">ORACLE PAPER LAB</span><h1>策略運行監控</h1></div>
+    <button id="refresh">重新整理</button>
+  </header>
+  <main>
+    <section class="hero">
+      <div><span id="health" class="dot waiting"></span><strong id="summary">正在連線…</strong><p id="updated">讀取 VPS 與策略狀態</p></div>
+      <div class="clock"><span>台北時間</span><b id="clock">--:--:--</b></div>
+    </section>
+    <section><div class="section-title"><h2>線上策略</h2><span>每 15 分鐘評估</span></div><div id="accounts" class="grid"></div></section>
+    <section><div class="section-title"><h2>排程服務</h2><span>Oracle Cloud VM</span></div><div id="timers" class="timers"></div></section>
+    <section class="next"><div><span class="eyebrow">NEXT STEP</span><h2>參數與策略控制</h2><p>目前維持唯讀。下一階段可加入風險比例、槓桿、策略版本與啟停排程，經確認後才送往 VPS。</p></div><button disabled>尚未啟用</button></section>
+  </main>
+  <template id="empty"><div class="empty">目前沒有讀到策略帳戶</div></template>
+  <script src="app.js"></script>
+</body>
+</html>
