@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Optional
 
 
@@ -34,6 +34,9 @@ class RuntimeSnapshot:
     latest_missed: Optional[dict]
     trade_count: int
     missed_count: int
+    strategy_halted: bool = False
+    trades: list[dict] = field(default_factory=list)
+    missed_trades: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)

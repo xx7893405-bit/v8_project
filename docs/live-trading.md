@@ -37,3 +37,5 @@ BTC=300:100,ETH=400:100,SOL=300:100
 ```
 
 各幣種的已實現淨損益只會回寫自己的策略資金。低於 `min_strategy_amount` 後，該幣種停止新進場並產生一次 `STRATEGY_HALTED_MIN_AMOUNT` 事件；既有倉位仍由風控流程管理，不會自動強制平倉。
+
+單幣種的 `oracle_strategy_job.py`、`paper_trader.py` 與 `run_live_trading.py` 也支援 `--min-strategy-amount`，預設 100；設為 0 可停用下限。單幣種策略會使用自身累積後的 balance，低於下限後停止後續新進場。

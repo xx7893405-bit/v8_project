@@ -23,6 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--htf", choices=["1h", "4h"], default="1h")
     parser.add_argument("--risk-pct", type=float, default=0.01)
     parser.add_argument("--max-risk-pct", type=float, default=0.02)
+    parser.add_argument("--min-strategy-amount", type=float, default=100.0)
     parser.add_argument("--max-leverage", type=float, default=3.0)
     parser.add_argument("--margin-mode", choices=["isolated", "cross"], default="isolated")
     parser.add_argument("--dry-run", dest="dry_run", action="store_true", default=True)
@@ -38,8 +39,10 @@ def main() -> None:
         raise ValueError("risk-pct must be > 0, <= max-risk-pct, and max-risk-pct <= 1")
     if not 1 <= args.max_leverage <= 100:
         raise ValueError("max-leverage must be between 1 and 100")
+    if args.min_strategy_amount < 0:
+        raise ValueError("min-strategy-amount cannot be negative")
     strategy = build_default_strategy()
-    strategy = strategy.__class__(**{**strategy.__dict__, "risk_pct": args.risk_pct, "leverage": args.max_leverage})
+    strategy = strategy.__class__(**{**strategy.__dict__, "risk_pct": args.risk_pct, "leverage": args.max_leverage, "min_strategy_amount": args.min_strategy_amount})
     strategy_impl = build_strategy(args.strategy, args.htf, args.ltf)
     try:
         feed = ExchangeApiMarketDataFeed(
