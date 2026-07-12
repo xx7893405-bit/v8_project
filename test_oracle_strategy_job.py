@@ -39,6 +39,10 @@ class OracleStrategyJobTest(unittest.TestCase):
         with patch.object(sys, "argv", ["oracle_strategy_job.py", "--account-id", "paper-002"]):
             self.assertEqual(parse_args().account_id, "paper-002")
 
+    def test_account_name_is_configurable(self):
+        with patch.object(sys, "argv", ["oracle_strategy_job.py", "--account-name", "主帳戶"]):
+            self.assertEqual(parse_args().account_name, "主帳戶")
+
     def test_max_leverage_is_configurable(self):
         with patch.object(sys, "argv", ["oracle_strategy_job.py", "--max-leverage", "1000"]):
             self.assertEqual(parse_args().max_leverage, 1000.0)

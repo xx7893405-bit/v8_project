@@ -11,7 +11,7 @@ from pathlib import Path
 from api_market_data import ApiFeedConfig, ExchangeApiMarketDataFeed
 from backtest_config import StrategyConfig
 from multi_timeframe_backtest import MultiTimeframeBacktester
-from oracle_strategy_job import build_strategy
+from oracle_strategy_job import build_strategy, classify_decision, publish_status
 from portfolio_runtime import PortfolioAccount
 
 
@@ -103,15 +103,37 @@ def run_account(config: dict, state_path: Path, events_path: Path) -> dict:
         with events_path.open("a", encoding="utf-8") as handle:
             for event in events:
                 handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+    payload_time = datetime.now(timezone.utc).isoformat()
     payload = {
+        "status": "ok",
         "account_id": config["account_id"],
-        "evaluated_at": datetime.now(timezone.utc).isoformat(),
+        "account_name": config.get("account_name", config["account_id"]),
+        "evaluated_at": payload_time,
         "portfolio": portfolio.snapshot(),
         "snapshots": snapshots,
         "event_count": len(events),
         "unallocated_balance": portfolio.unallocated_balance,
+        "symbols": {
+            symbol: {
+                "symbol": symbol,
+                "strategy": values["strategy"],
+                "evaluated_at": payload_time,
+                "decision": classify_decision(snapshots[symbol])[0],
+                "reason": classify_decision(snapshots[symbol])[1],
+                "risk_pct": float(config.get("risk_pct", 0.01)),
+                "max_leverage": float(config.get("max_leverage", 3.0)),
+                "market": {
+                    "symbol": values.get("public_symbol", symbol),
+                    "signal_timeframe": config.get("ltf", "15m"),
+                    "structure_timeframe": config.get("htf", "1h"),
+                },
+                "snapshot": snapshots[symbol],
+            }
+            for symbol, values in config["symbols"].items()
+        },
     }
     atomic_json_write(state_path, payload)
+    publish_status(payload)
     return payload
 
 

@@ -1,0 +1,25 @@
+{
+  "account_id": "paper-nfe-v2",
+  "account_name": "NFE V2 主帳戶",
+  "account_balance": 10000,
+  "risk_pct": 0.05,
+  "max_leverage": 1,
+  "htf": "1h",
+  "ltf": "15m",
+  "symbols": {
+    "BTC/USDT:USDT": {
+      "strategy": "nfe-v2",
+      "margin_budget": 5000,
+      "min_strategy_amount": 100,
+      "public_symbol": "BTCUSDT",
+      "okx_symbol": "BTC-USDT-SWAP"
+    },
+    "ETH/USDT:USDT": {
+      "strategy": "nfe-v2",
+      "margin_budget": 5000,
+      "min_strategy_amount": 100,
+      "public_symbol": "ETHUSDT",
+      "okx_symbol": "ETH-USDT-SWAP"
+    }
+  }
+}

@@ -43,6 +43,10 @@ def parse_args() -> argparse.Namespace:
         default="paper-nfe-v2",
         help="Stable paper-account identifier included in state and events",
     )
+    parser.add_argument(
+        "--account-name",
+        help="Human-readable account name shown by the monitor",
+    )
     parser.add_argument("--ltf", choices=["5m", "15m"], default="15m")
     parser.add_argument("--htf", choices=["1h", "4h"], default="1h")
     parser.add_argument("--state-path", default="runtime/oracle_strategy_state.json")
@@ -303,6 +307,7 @@ def main() -> None:
     payload = {
         "status": "ok",
         "account_id": args.account_id,
+        "account_name": args.account_name or args.account_id,
         "evaluated_at": datetime.now(timezone.utc).isoformat(),
         "market": {
             "exchange": args.exchange,
