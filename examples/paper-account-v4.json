@@ -1,0 +1,16 @@
+{
+  "account_id": "paper-v4-portfolio",
+  "account_balance": 1000,
+  "exchange": "binance",
+  "risk_pct": 0.05,
+  "max_leverage": 1000,
+  "lookback_days": 45,
+  "micro_lookback_days": 45,
+  "ltf": "15m",
+  "htf": "1h",
+  "symbols": {
+    "BTC/USDT:USDT": {"strategy": "nfe-v4", "public_symbol": "BTCUSDT", "okx_symbol": "BTC-USDT", "margin_budget": 300, "min_strategy_amount": 100},
+    "ETH/USDT:USDT": {"strategy": "nfe-v4", "public_symbol": "ETHUSDT", "okx_symbol": "ETH-USDT", "margin_budget": 300, "min_strategy_amount": 100},
+    "SOL/USDT:USDT": {"strategy": "nfe-v4", "public_symbol": "SOLUSDT", "okx_symbol": "SOL-USDT", "margin_budget": 300, "min_strategy_amount": 100}
+  }
+}
