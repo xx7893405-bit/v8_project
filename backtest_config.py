@@ -39,6 +39,7 @@ class BacktestConfig:
 @dataclass(frozen=True)
 class RunConfig:
     mode: str = "NONE"
+    allow_new_entries: bool = True
     allow_long_entries: bool = True
     allow_short_entries: bool = True
     enable_be: bool = False
@@ -81,6 +82,7 @@ class StrategyConfig:
     sl_sd_mult: float = 1.2
     tp2_extension_sd_mult: float = 1.2
     mode: str = "NONE"
+    allow_new_entries: bool = True
     allow_long_entries: bool = True
     allow_short_entries: bool = True
     enable_be: bool = False

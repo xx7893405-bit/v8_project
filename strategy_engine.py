@@ -1165,7 +1165,12 @@ class MultiTimeframeBacktester:
                 missed_trades,
             )
 
-            if active_position is None and pending_retest_order is None and pending_breakout_order is None:
+            if (
+                cfg.allow_new_entries
+                and active_position is None
+                and pending_retest_order is None
+                and pending_breakout_order is None
+            ):
                 decision = self.strategy.scan_entry_signal(self, prev, curr, curr_time, balance, cfg)
                 missed_trades.extend(decision.missed)
                 if decision.retrace_order is not None:

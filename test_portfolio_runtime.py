@@ -1,5 +1,6 @@
 import unittest
 
+from backtest_config import StrategyConfig
 from portfolio_runtime import PortfolioAccount, parse_symbol_allocations
 
 
@@ -37,6 +38,10 @@ class PortfolioRuntimeTest(unittest.TestCase):
     def test_parser(self):
         config = parse_symbol_allocations("BTC=300:100,ETH=400:120,SOL=300:80")
         self.assertEqual(config["ETH"]["min_strategy_amount"], 120)
+
+    def test_strategy_config_can_disable_new_entries(self):
+        config = StrategyConfig(allow_new_entries=False)
+        self.assertFalse(config.to_run_config().allow_new_entries)
 
 
 if __name__ == "__main__":
