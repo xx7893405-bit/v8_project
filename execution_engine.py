@@ -62,6 +62,7 @@ class CcxtExecutionClient:
         password: Optional[str] = None,
         sandbox: bool = True,
         market_type: str = "swap",
+        margin_mode: str = "isolated",
     ):
         if exchange not in {"binance", "okx"}:
             raise ValueError("exchange must be binance or okx")
@@ -87,9 +88,15 @@ class CcxtExecutionClient:
         if symbol not in self.exchange.markets:
             raise ValueError(f"{symbol!r} is unavailable on {exchange}")
         self.market = self.exchange.market(symbol)
+        if not self.market.get("contract"):
+            raise ValueError("live execution only supports contract markets")
+        if margin_mode not in {"isolated", "cross"}:
+            raise ValueError("margin_mode must be isolated or cross")
+        self.margin_mode = margin_mode
+        self.exchange.set_margin_mode(margin_mode, symbol)
 
     @classmethod
-    def from_environment(cls, exchange: str, symbol: str, *, sandbox: bool = True):
+    def from_environment(cls, exchange: str, symbol: str, *, sandbox: bool = True, margin_mode: str = "isolated"):
         prefix = exchange.upper()
         return cls(
             exchange,
@@ -98,13 +105,18 @@ class CcxtExecutionClient:
             secret=os.getenv(f"{prefix}_API_SECRET"),
             password=os.getenv(f"{prefix}_API_PASSWORD"),
             sandbox=sandbox,
+            margin_mode=margin_mode,
         )
 
     def _amount(self, amount: float) -> float:
-        value = float(self.exchange.amount_to_precision(self.symbol, amount))
+        contract_size = float(self.market.get("contractSize") or 1.0)
+        if contract_size <= 0:
+            raise ValueError("exchange returned an invalid contractSize")
+        contracts = float(amount) / contract_size
+        value = float(self.exchange.amount_to_precision(self.symbol, contracts))
         minimum = self.market.get("limits", {}).get("amount", {}).get("min")
         if value <= 0 or (minimum is not None and value < float(minimum)):
-            raise ValueError(f"order quantity {amount} is below exchange minimum")
+            raise ValueError(f"order quantity {amount} ({contracts} contracts) is below exchange minimum")
         return value
 
     def _price(self, price: Optional[float]) -> Optional[float]:
@@ -126,7 +138,10 @@ class CcxtExecutionClient:
         amount = self._amount(order.quantity)
         price = self._price(order.price)
         if order.leverage is not None:
-            self.exchange.set_leverage(float(order.leverage), self.symbol)
+            max_leverage = self.market.get("limits", {}).get("leverage", {}).get("max")
+            if max_leverage is not None and float(order.leverage) > float(max_leverage):
+                raise ValueError(f"requested leverage exceeds exchange maximum {max_leverage}")
+            self.exchange.set_leverage(float(order.leverage), self.symbol, {"marginMode": self.margin_mode})
         params = self._params(order)
         if order.order_type == "stop":
             if self.exchange_name == "binance":
@@ -160,11 +175,19 @@ class CcxtExecutionClient:
             side = str(position.get("side") or "").upper()
             if side not in {"LONG", "SHORT"}:
                 continue
+            contract_size = float(self.market.get("contractSize") or 1.0)
+            contracts = float(position.get("contracts") or 0)
             return {
                 "type": "LONG" if side == "LONG" else "SHORT",
-                "size": contracts,
+                "size": contracts * contract_size,
+                "contracts": contracts,
+                "contract_size": contract_size,
                 "entry_price": float(position.get("entryPrice") or 0),
                 "leverage": float(position.get("leverage") or 0),
+                "margin_mode": position.get("marginMode") or self.margin_mode,
+                "initial_margin": float(position.get("initialMargin") or 0),
+                "maintenance_margin": float(position.get("maintenanceMargin") or 0),
+                "liquidation_price": float(position.get("liquidationPrice") or 0) or None,
             }
         return None
 

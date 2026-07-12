@@ -10,7 +10,7 @@ class FakeExchange:
     def price_to_precision(self, symbol, value):
         return f"{value:.1f}"
 
-    def set_leverage(self, leverage, symbol):
+    def set_leverage(self, leverage, symbol, params=None):
         self.leverage = leverage
 
     def create_order(self, *args):
@@ -19,12 +19,17 @@ class FakeExchange:
 
 
 class ExecutionEngineTest(unittest.TestCase):
-    def test_entry_passes_precision_and_leverage(self):
+    def test_entry_converts_base_quantity_to_contracts(self):
         client = CcxtExecutionClient.__new__(CcxtExecutionClient)
         client.exchange_name = "binance"
         client.symbol = "BTC/USDT:USDT"
         client.exchange = FakeExchange()
-        client.market = {"limits": {"amount": {"min": 0.001}}}
+        client.market = {
+            "contract": True,
+            "contractSize": 0.001,
+            "limits": {"amount": {"min": 1}, "leverage": {"max": 20}},
+        }
+        client.margin_mode = "isolated"
 
         result = client.submit_order(
             ExecutionOrder(
@@ -38,7 +43,7 @@ class ExecutionEngineTest(unittest.TestCase):
 
         self.assertTrue(result.accepted)
         self.assertEqual(client.exchange.leverage, 3.0)
-        self.assertEqual(client.exchange.order[:5], ("BTC/USDT:USDT", "limit", "buy", 0.123, 60000.1))
+        self.assertEqual(client.exchange.order[:5], ("BTC/USDT:USDT", "limit", "buy", 123.45, 60000.1))
 
     def test_engine_submits_protective_stop_as_reduce_only(self):
         class Client:

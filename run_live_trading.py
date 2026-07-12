@@ -24,6 +24,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--risk-pct", type=float, default=0.01)
     parser.add_argument("--max-risk-pct", type=float, default=0.02)
     parser.add_argument("--max-leverage", type=float, default=3.0)
+    parser.add_argument("--margin-mode", choices=["isolated", "cross"], default="isolated")
     parser.add_argument("--dry-run", dest="dry_run", action="store_true", default=True)
     parser.add_argument("--live", dest="dry_run", action="store_false")
     parser.add_argument("--sandbox", dest="sandbox", action="store_true", default=True)
@@ -69,7 +70,7 @@ def main() -> None:
         if os.getenv("ALLOW_LIVE_TRADING") != "YES":
             raise RuntimeError("Set ALLOW_LIVE_TRADING=YES explicitly before using --live")
         client = CcxtExecutionClient.from_environment(
-            args.exchange, args.ccxt_symbol, sandbox=args.sandbox
+            args.exchange, args.ccxt_symbol, sandbox=args.sandbox, margin_mode=args.margin_mode
         )
     engine = LiveExecutionEngine(client)
     entry_result = engine.submit_entry_from_position(active_position)
