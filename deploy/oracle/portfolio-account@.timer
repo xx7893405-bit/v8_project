@@ -1,0 +1,10 @@
+[Unit]
+Description=Run multi-symbol paper portfolio account %i every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+Unit=portfolio-account@%i.service
+
+[Install]
+WantedBy=timers.target

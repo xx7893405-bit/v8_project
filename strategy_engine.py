@@ -541,6 +541,8 @@ class MultiTimeframeBacktester:
 
     @staticmethod
     def _validate_run_config(cfg: RunConfig) -> None:
+        if cfg.min_strategy_amount < 0:
+            raise ValueError("min_strategy_amount cannot be negative")
         if cfg.entry_policy not in {"hybrid", "breakout_only", "retrace_only"}:
             raise ValueError("entry_policy must be one of: hybrid, breakout_only, retrace_only")
         if cfg.exit_model not in {"vwap", "structure_atr", "regime"}:
@@ -1175,7 +1177,13 @@ class MultiTimeframeBacktester:
                 missed_trades,
             )
 
-            if active_position is None and pending_retest_order is None and pending_breakout_order is None:
+            if (
+                cfg.allow_new_entries
+                and balance >= cfg.min_strategy_amount
+                and active_position is None
+                and pending_retest_order is None
+                and pending_breakout_order is None
+            ):
                 decision = self.strategy.scan_entry_signal(self, prev, curr, curr_time, balance, cfg)
                 missed_trades.extend(decision.missed)
                 if decision.retrace_order is not None:

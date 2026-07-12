@@ -30,6 +30,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--database", default="data/market_data.duckdb")
     parser.add_argument("--lookback-days", type=int, default=45)
     parser.add_argument("--risk-pct", type=float, default=0.05)
+    parser.add_argument("--min-strategy-amount", type=float, default=100.0)
     parser.add_argument("--max-leverage", type=float, default=1.0)
     parser.add_argument(
         "--strategy",
@@ -152,6 +153,25 @@ def strategy_events(payload: dict, events_path: Path) -> list[dict]:
                 **trade,
             }
         )
+    if snapshot.get("strategy_halted") and not payload.get("previous_strategy_halted", False):
+        event_id = f"{payload['run_id']}:STRATEGY_HALTED_MIN_AMOUNT"
+        if event_id not in written:
+            events.append(
+                {
+                    "event_id": event_id,
+                    "run_id": payload["run_id"],
+                    "account_id": payload["account_id"],
+                    "event_type": "STRATEGY_HALTED_MIN_AMOUNT",
+                    "detected_at": payload["evaluated_at"],
+                    "evaluated_at": payload["evaluated_at"],
+                    "as_of": snapshot.get("as_of"),
+                    "strategy": payload.get("strategy"),
+                    "decision": "HALTED",
+                    "balance": snapshot.get("balance"),
+                    "min_strategy_amount": payload.get("min_strategy_amount"),
+                    "reason": "strategy_balance_below_minimum",
+                }
+            )
     return events
 
 
@@ -212,6 +232,8 @@ def main() -> None:
     args = parse_args()
     if not 0 < args.risk_pct <= 1:
         raise ValueError("risk-pct must be greater than 0 and no greater than 1")
+    if args.min_strategy_amount < 0:
+        raise ValueError("min-strategy-amount cannot be negative")
     if not 1 <= args.max_leverage <= 1000:
         raise ValueError("max-leverage must be between 1 and 1000")
     sync = CcxtOHLCVSync(
@@ -259,12 +281,25 @@ def main() -> None:
     state_path = Path(args.state_path)
     previous_snapshot = load_resume_snapshot(state_path, forward_start, run_id)
     previous_as_of = previous_snapshot.get("as_of") if previous_snapshot else None
+    previous_strategy_halted = bool(previous_snapshot and previous_snapshot.get("strategy_halted"))
+    previous_balance = float(previous_snapshot.get("balance", 10000.0)) if previous_snapshot else 10000.0
     snapshot = backtester.build_runtime_snapshot(
-        config,
+        StrategyConfig(
+            **{
+                **config.__dict__,
+                "allow_new_entries": not previous_strategy_halted and previous_balance >= args.min_strategy_amount,
+                "min_strategy_amount": args.min_strategy_amount,
+            }
+        ),
         start_at=start_at,
         resume_snapshot=previous_snapshot,
     )
+    snapshot["strategy_halted"] = bool(
+        args.min_strategy_amount > 0 and snapshot["balance"] < args.min_strategy_amount
+    ) or previous_strategy_halted
     decision, reason = classify_decision(snapshot)
+    if snapshot["strategy_halted"] and snapshot.get("active_position") is None:
+        decision, reason = "HALTED", "MIN_STRATEGY_AMOUNT"
     payload = {
         "status": "ok",
         "account_id": args.account_id,
@@ -278,6 +313,7 @@ def main() -> None:
         },
         "strategy": args.strategy,
         "risk_pct": args.risk_pct,
+        "min_strategy_amount": args.min_strategy_amount,
         "max_leverage": args.max_leverage,
         "forward_start": forward_start,
         "run_id": run_id,
@@ -287,6 +323,7 @@ def main() -> None:
         ),
         "decision": decision,
         "reason": reason,
+        "previous_strategy_halted": previous_strategy_halted,
         "snapshot": snapshot,
     }
     events_path = Path(args.events_path)

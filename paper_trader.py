@@ -25,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cycles", type=int, default=1, help="Use 0 for infinite polling.")
     parser.add_argument("--state-path", default="paper_trading_state.json")
     parser.add_argument("--journal-path", default="paper_trading_journal.json")
+    parser.add_argument("--min-strategy-amount", type=float, default=100.0)
     return parser.parse_args()
 
 
@@ -63,23 +64,45 @@ def main() -> None:
         journal_path=args.journal_path,
     )
     strategy = build_default_strategy()
+    if args.min_strategy_amount < 0:
+        raise ValueError("min-strategy-amount cannot be negative")
+    strategy = strategy.__class__(
+        **{**strategy.__dict__, "min_strategy_amount": args.min_strategy_amount}
+    )
 
     iteration = 0
     while runtime.cycles == 0 or iteration < runtime.cycles:
+        previous_snapshot = None
+        if Path(runtime.state_path).exists():
+            with open(runtime.state_path, "r", encoding="utf-8") as fh:
+                previous_snapshot = json.load(fh)
+        previous_halted = bool(previous_snapshot and previous_snapshot.get("strategy_halted"))
+        previous_balance = float(previous_snapshot.get("balance", strategy.initial_balance)) if previous_snapshot else strategy.initial_balance
+        cycle_strategy = strategy.__class__(
+            **{
+                **strategy.__dict__,
+                "allow_new_entries": not previous_halted and previous_balance >= args.min_strategy_amount,
+            }
+        )
         try:
             feed = build_feed(args)
             backtester = MultiTimeframeBacktester(
-                config=strategy.to_backtest_config(),
+                config=cycle_strategy.to_backtest_config(),
                 data_feed=feed,
                 data_dir=args.data_dir,
             )
-            snapshot_payload = backtester.build_runtime_snapshot(strategy)
+            snapshot_payload = backtester.build_runtime_snapshot(
+                cycle_strategy, resume_snapshot=previous_snapshot
+            )
         except FileNotFoundError as exc:
             print(f"paper trader failed: missing data file: {exc}")
             return
         except Exception as exc:
             print(f"paper trader failed: {exc}")
             return
+        snapshot_payload["strategy_halted"] = bool(
+            args.min_strategy_amount > 0 and snapshot_payload["balance"] < args.min_strategy_amount
+        ) or previous_halted
         snapshot = RuntimeSnapshot(mode="paper", **snapshot_payload)
 
         with open(runtime.state_path, "w", encoding="utf-8") as fh:
