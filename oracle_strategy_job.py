@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import uuid
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -96,6 +97,23 @@ def atomic_json_write(path: Path, payload: dict) -> None:
         except FileNotFoundError:
             pass
         raise
+
+
+def publish_status(payload: dict) -> None:
+    url, token = os.getenv("STATUS_PUSH_URL"), os.getenv("STATUS_PUSH_TOKEN")
+    site_token = os.getenv("STATUS_SITE_TOKEN")
+    if not url or not token or not site_token:
+        return
+    request = urllib.request.Request(
+        url, json.dumps(payload).encode(), method="POST",
+        headers={"Authorization": f"Bearer {token}", "OAI-Sites-Authorization": f"Bearer {site_token}", "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            if response.status >= 300:
+                raise RuntimeError(f"status push returned {response.status}")
+    except Exception as error:
+        print(f"warning: status push failed: {error}")
 
 
 def strategy_events(payload: dict, events_path: Path) -> list[dict]:
@@ -274,6 +292,7 @@ def main() -> None:
     events_path = Path(args.events_path)
     append_jsonl(events_path, strategy_events(payload, events_path))
     atomic_json_write(state_path, payload)
+    publish_status(payload)
     print(json.dumps(payload, ensure_ascii=False))
 
 
