@@ -4,6 +4,7 @@
   "exchange": "binance",
   "risk_pct": 0.05,
   "max_leverage": 1000,
+  "start_at": "2026-07-01T00:00:00Z",
   "lookback_days": 45,
   "micro_lookback_days": 45,
   "ltf": "15m",

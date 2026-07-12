@@ -13,6 +13,7 @@ from market_data import MarketDataFeed
 
 
 API_TIMEFRAME_RULES = {
+    "5m": "5min",
     "1h": "1h",
     "4h": "4h",
     "1d": "1d",
@@ -69,6 +70,9 @@ class ExchangeApiMarketDataFeed(MarketDataFeed):
         if timeframe not in self._timeframe_cache:
             if timeframe == "15m":
                 self._timeframe_cache[timeframe] = self._fetch_remote_ohlcv("15m", self.config.lookback_days)
+            elif timeframe == "5m":
+                base_df = self._fetch_remote_ohlcv("1m", self.config.lookback_days)
+                self._timeframe_cache[timeframe] = self._resample_from_15m(base_df, timeframe)
             elif timeframe in API_TIMEFRAME_RULES:
                 base_df = self._get_timeframe_df("15m")
                 self._timeframe_cache[timeframe] = self._resample_from_15m(base_df, timeframe)

@@ -8,6 +8,8 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
+
 from api_market_data import ApiFeedConfig, ExchangeApiMarketDataFeed
 from backtest_config import StrategyConfig
 from multi_timeframe_backtest import MultiTimeframeBacktester
@@ -88,7 +90,14 @@ def run_account(config: dict, state_path: Path, events_path: Path) -> dict:
             data_feed=feed,
             strategy=build_strategy(values["strategy"], config.get("htf", "1h"), config.get("ltf", "15m")),
         )
-        snapshot = backtester.build_runtime_snapshot(strategy_config, resume_snapshot=resume_snapshot)
+        start_at = None
+        if resume_snapshot is None and config.get("start_at"):
+            start_at = pd.Timestamp(config["start_at"])
+            if start_at.tzinfo is not None:
+                start_at = start_at.tz_convert("UTC").tz_localize(None)
+        snapshot = backtester.build_runtime_snapshot(
+            strategy_config, start_at=start_at, resume_snapshot=resume_snapshot
+        )
         previous_trade_count = len(previous_snapshot.get("trades", [])) if previous_snapshot else 0
         for trade in snapshot.get("trades", [])[previous_trade_count:]:
             event = portfolio.apply_realized_pnl(symbol, float(trade.get("pnl", 0.0)))
