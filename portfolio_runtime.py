@@ -6,6 +6,7 @@ from typing import Optional
 
 @dataclass
 class SymbolPortfolio:
+    strategy: str
     initial_margin_budget: float
     min_strategy_amount: float
     strategy_amount: Optional[float] = None
@@ -13,6 +14,8 @@ class SymbolPortfolio:
     halt_notified: bool = False
 
     def __post_init__(self) -> None:
+        if not self.strategy:
+            raise ValueError("strategy is required")
         if self.initial_margin_budget <= 0:
             raise ValueError("initial_margin_budget must be positive")
         if self.min_strategy_amount < 0:
@@ -42,10 +45,14 @@ class PortfolioAccount:
 
     @classmethod
     def from_config(cls, account_balance: float, config: dict[str, dict[str, float]]):
+        for symbol, values in config.items():
+            if not values.get("strategy"):
+                raise ValueError(f"{symbol} must define exactly one strategy")
         return cls(
             account_balance,
             {
                 symbol: SymbolPortfolio(
+                    strategy=str(values["strategy"]),
                     initial_margin_budget=float(values["margin_budget"]),
                     min_strategy_amount=float(values["min_strategy_amount"]),
                 )
@@ -53,10 +60,41 @@ class PortfolioAccount:
             },
         )
 
+    @property
+    def unallocated_balance(self) -> float:
+        return self.reserve
+
+    def add_symbol(
+        self,
+        symbol: str,
+        *,
+        strategy: str,
+        margin_budget: float,
+        min_strategy_amount: float,
+    ) -> None:
+        if symbol in self.symbols:
+            raise ValueError(f"symbol {symbol} already has a strategy")
+        if margin_budget > self.unallocated_balance:
+            raise ValueError("margin budget exceeds unallocated balance")
+        self.symbols[symbol] = SymbolPortfolio(
+            strategy=strategy,
+            initial_margin_budget=margin_budget,
+            min_strategy_amount=min_strategy_amount,
+        )
+        self.reserve -= margin_budget
+
+    def remove_symbol(self, symbol: str, *, has_open_position: bool = False) -> float:
+        if has_open_position:
+            raise ValueError("cannot remove a symbol with an open position")
+        portfolio = self.symbols.pop(symbol)
+        amount = float(portfolio.strategy_amount or 0.0)
+        self.reserve += amount
+        return amount
+
     @classmethod
     def from_snapshot(cls, snapshot: dict):
         symbols = {
-            symbol: SymbolPortfolio(**values)
+            symbol: SymbolPortfolio(strategy=values.get("strategy", "nfe-v2"), **{k: v for k, v in values.items() if k != "strategy"})
             for symbol, values in snapshot["symbols"].items()
         }
         account = cls(float(snapshot["account_balance"]), symbols)
@@ -105,6 +143,7 @@ def parse_symbol_allocations(value: str) -> dict[str, dict[str, float]]:
         if not symbol:
             raise ValueError("symbol cannot be empty")
         result[symbol] = {
+            "strategy": "nfe-v2",
             "margin_budget": float(margin),
             "min_strategy_amount": float(minimum),
         }

@@ -1,0 +1,23 @@
+[Unit]
+Description=Multi-symbol paper portfolio account %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/opt/v8_project
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/v8_project/.venv/bin/python portfolio_strategy_job.py --config runtime/accounts/%i/config.json --state-path runtime/accounts/%i/portfolio_state.json --events-path runtime/accounts/%i/portfolio_events.jsonl
+TimeoutStartSec=12min
+Nice=10
+IOSchedulingClass=idle
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/v8_project/data /opt/v8_project/runtime
+
+[Install]
+WantedBy=multi-user.target

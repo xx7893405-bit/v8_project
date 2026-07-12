@@ -48,6 +48,16 @@ systemctl list-timers nfe-v2-strategy.timer nfe-v4-strategy.timer
 
 正式排程分別由 `nfe-v2-strategy.service` 與 `nfe-v4-strategy.service` 決定。新增策略時必須配置唯一 `ACCOUNT_ID`，並使用 `runtime/accounts/${ACCOUNT_ID}/` 下的獨立狀態、起點與事件檔。
 
+多幣種帳戶使用 `portfolio-account@.service`／`portfolio-account@.timer` template。先將帳戶設定放在 `runtime/accounts/<account_id>/config.json`，再啟用對應 timer：
+
+```bash
+sudo cp deploy/oracle/portfolio-account@.service deploy/oracle/portfolio-account@.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now portfolio-account@paper-user-001.timer
+```
+
+設定中的每個 symbol 只能指定一個 strategy；新增 symbol 只能消耗該帳戶的 `unallocated_balance`，不能重用其他 symbol 的資金。
+
 查看執行結果與日誌：
 
 ```bash
