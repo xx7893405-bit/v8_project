@@ -134,6 +134,7 @@ class MultiTimeframeBacktester:
         self._validate_backtest_config()
         self.data_feed = data_feed or CSVMarketDataFeed(data_dir=data_dir)
         self.strategy = strategy or V8FvgOverlapStrategy()
+        self.price_scale = 1.0
         self.load_all_data()
 
     @property
@@ -180,6 +181,12 @@ class MultiTimeframeBacktester:
         self.df_1h = self.data_feed.load_timeframe("1h")
         self.df_4h = self.data_feed.load_timeframe("4h")
         self.df_1d = self.data_feed.load_timeframe("1d")
+
+        if not self.df_15m.empty:
+            first_close = self.df_15m["close"].iloc[0]
+            self.price_scale = first_close / 60000.0
+        else:
+            self.price_scale = 1.0
 
     def get_timeframe_df(self, timeframe: str) -> pd.DataFrame:
         timeframe_map = {
@@ -365,14 +372,16 @@ class MultiTimeframeBacktester:
         return quantity * (entry_price - exit_price)
 
     def _apply_stop_exit_slippage(self, pos_type: str, exit_price: float) -> float:
+        stop_loss_slippage = self.config.stop_loss_slippage_usd * self.price_scale
         if pos_type == "LONG":
-            return max(0.0, exit_price - self.config.stop_loss_slippage_usd)
-        return exit_price + self.config.stop_loss_slippage_usd
+            return max(0.0, exit_price - stop_loss_slippage)
+        return exit_price + stop_loss_slippage
 
     def _apply_liquidation_exit_slippage(self, pos_type: str, exit_price: float) -> float:
+        liquidation_slippage = self.config.liquidation_slippage_usd * self.price_scale
         if pos_type == "LONG":
-            return max(0.0, exit_price - self.config.liquidation_slippage_usd)
-        return exit_price + self.config.liquidation_slippage_usd
+            return max(0.0, exit_price - liquidation_slippage)
+        return exit_price + liquidation_slippage
 
     def _max_notional_for_balance(self, balance: float) -> float:
         leverage = max(self.config.leverage, 1.0)
@@ -628,7 +637,7 @@ class MultiTimeframeBacktester:
         order_type = order["type"]
 
         if order_type == "LONG":
-            market_entry_p = curr["open"] + self.config.slippage_usd
+            market_entry_p = curr["open"] + (self.config.slippage_usd * self.price_scale)
             if order["exit_model"] == "skip":
                 return None, None
             if order["exit_model"] == "vwap":
@@ -647,7 +656,7 @@ class MultiTimeframeBacktester:
             is_valid_target = tp2 > market_entry_p
             math_rr = ((tp1 - market_entry_p) * cfg.tp1_close_pct + (tp2 - market_entry_p) * (1.0 - cfg.tp1_close_pct)) / net_sl_dist if net_sl_dist > 0 else 0.0
         else:
-            market_entry_p = curr["open"] - self.config.slippage_usd
+            market_entry_p = curr["open"] - (self.config.slippage_usd * self.price_scale)
             if order["exit_model"] == "skip":
                 return None, None
             if order["exit_model"] == "vwap":
@@ -1024,10 +1033,11 @@ class MultiTimeframeBacktester:
         if net_sl_dist <= 0 or not valid_target:
             return None, None
 
+        limit_slippage = self.config.limit_order_slippage_usd * self.price_scale
         effective_entry_price = (
-            entry_price + self.config.limit_order_slippage_usd
+            entry_price + limit_slippage
             if side == "LONG"
-            else entry_price - self.config.limit_order_slippage_usd
+            else entry_price - limit_slippage
         )
         effective_net_sl_dist = (
             (effective_entry_price - sl) if side == "LONG" else (sl - effective_entry_price)

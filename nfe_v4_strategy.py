@@ -103,15 +103,16 @@ class NFEV4Strategy(NFEDoubleLevelStrategy):
                         # 判斷是否為多單順勢 (4H 為 LONG)
                         is_long_trend = (bias_4h == "LONG")
                         
+                        scale = getattr(backtester, "price_scale", 1.0)
                         if is_long_trend:
                             # 順勢 ➔ V1 進攻型
-                            padding = self.sl_padding # 固定 20.0
+                            padding = self.sl_padding * scale
                             tp1 = target_high
                             tp2 = target_high + (target_high - entry_price) * 0.5
                             is_defensive = False
                         else:
                             # 逆勢/震盪 ➔ V2 防守型
-                            padding = atr * self.defensive_atr_mult if atr > 0 else self.sl_padding
+                            padding = atr * self.defensive_atr_mult if atr > 0 else self.sl_padding * scale
                             tp1 = target_high
                             tp2 = 9999999.0  # 移除 TP2 限制
                             is_defensive = True
@@ -170,15 +171,16 @@ class NFEV4Strategy(NFEDoubleLevelStrategy):
                         # 判斷是否為空單順勢 (4H 為 SHORT)
                         is_short_trend = (bias_4h == "SHORT")
                         
+                        scale = getattr(backtester, "price_scale", 1.0)
                         if is_short_trend:
                             # 順勢 ➔ V1 進攻型
-                            padding = self.sl_padding  # 固定 20.0
+                            padding = self.sl_padding * scale
                             tp1 = target_low
                             tp2 = target_low - (entry_price - target_low) * 0.5
                             is_defensive = False
                         else:
                             # 逆勢/震盪 ➔ V2 防守型
-                            padding = atr * self.defensive_atr_mult if atr > 0 else self.sl_padding
+                            padding = atr * self.defensive_atr_mult if atr > 0 else self.sl_padding * scale
                             tp1 = target_low
                             tp2 = 0.01  # 移除 TP2 限制
                             is_defensive = True
@@ -249,7 +251,8 @@ class NFEV4Strategy(NFEDoubleLevelStrategy):
 
             prev_row = df_ltf_slice.iloc[-2]
             atr = float(prev_row.get("ATR_14", 0.0))
-            padding = atr * self.defensive_atr_mult if atr > 0 else self.sl_padding
+            scale = getattr(backtester, "price_scale", 1.0)
+            padding = atr * self.defensive_atr_mult if atr > 0 else self.sl_padding * scale
 
             pos_type = active_position["type"]
             current_sl = active_position["sl"]

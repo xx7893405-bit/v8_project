@@ -76,10 +76,11 @@ class NFEV2Strategy(NFEDoubleLevelStrategy):
 
         # 取得進場時的 ATR 14 用於動態止損
         atr = float(prev.get("ATR_14", 0.0))
+        scale = getattr(backtester, "price_scale", 1.0)
         if self.use_dynamic_sl and atr > 0:
             padding = atr * self.sl_padding_atr_mult
         else:
-            padding = self.sl_padding
+            padding = self.sl_padding * scale
 
         long_ob_high = htf_state["htf_long_ob_high"]
         long_ob_low = htf_state["htf_long_ob_low"]
@@ -228,10 +229,11 @@ class NFEV2Strategy(NFEDoubleLevelStrategy):
             # 取得當前 ATR 用於動態 padding
             prev_row = df_ltf_slice.iloc[-2]
             atr = float(prev_row.get("ATR_14", 0.0))
+            scale = getattr(backtester, "price_scale", 1.0)
             if self.use_dynamic_sl and atr > 0:
                 padding = atr * self.sl_padding_atr_mult
             else:
-                padding = self.sl_padding
+                padding = self.sl_padding * scale
 
             pos_type = active_position["type"]
             current_sl = active_position["sl"]

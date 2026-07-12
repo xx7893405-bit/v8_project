@@ -326,8 +326,8 @@ class NFEDoubleLevelStrategy:
                     if ltf_close > latest_ltf_sh["high"]:
                         latest_ltf_sl = ltf_sls[-1]
 
-                        entry_price = latest_ltf_sl["ob_high"]
-                        sl = latest_ltf_sl["ob_low"] - self.sl_padding
+                        scale = getattr(backtester, "price_scale", 1.0)
+                        sl = latest_ltf_sl["ob_low"] - (self.sl_padding * scale)
                         tp1 = target_high
                         tp2 = target_high + (target_high - entry_price) * 0.5
 
@@ -381,8 +381,8 @@ class NFEDoubleLevelStrategy:
                     if ltf_close < latest_ltf_sl["low"]:
                         latest_ltf_sh = ltf_shs[-1]
 
-                        entry_price = latest_ltf_sh["ob_low"]
-                        sl = latest_ltf_sh["ob_high"] + self.sl_padding
+                        scale = getattr(backtester, "price_scale", 1.0)
+                        sl = latest_ltf_sh["ob_high"] + (self.sl_padding * scale)
                         tp1 = target_low
                         tp2 = target_low - (entry_price - target_low) * 0.5
 
