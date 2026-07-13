@@ -9,6 +9,7 @@ User=ubuntu
 WorkingDirectory=/opt/v8_project
 Environment=PYTHONUNBUFFERED=1
 Environment=ACCOUNT_ID=paper-nfe-v4
+EnvironmentFile=-/etc/v8_project/telegram.env
 ExecStart=/opt/v8_project/.venv/bin/python oracle_strategy_job.py --account-id ${ACCOUNT_ID} --account-name "NFE V4 防守帳戶" --strategy nfe-v4 --risk-pct 0.05 --max-leverage 1000 --min-strategy-amount 100 --start-at 2026-07-01T00:00:00Z --state-path runtime/accounts/${ACCOUNT_ID}/state.json --forward-start-path runtime/accounts/${ACCOUNT_ID}/forward_start.json --events-path runtime/accounts/${ACCOUNT_ID}/events.jsonl
 TimeoutStartSec=12min
 Nice=10

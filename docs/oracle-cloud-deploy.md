@@ -58,6 +58,17 @@ sudo systemctl enable --now portfolio-account@paper-user-001.timer
 
 設定中的每個 symbol 只能指定一個 strategy；新增 symbol 只能消耗該帳戶的 `unallocated_balance`，不能重用其他 symbol 的資金。
 
+若要在新進場或平倉時收到 Telegram 通知，建立 `/etc/v8_project/telegram.env`（不要提交到 Git）：
+
+```bash
+sudo install -d -m 700 /etc/v8_project
+sudo sh -c 'printf "TELEGRAM_BOT_TOKEN=%s\nTELEGRAM_CHAT_ID=%s\n" "<bot-token>" "<chat-id>" > /etc/v8_project/telegram.env'
+sudo chmod 600 /etc/v8_project/telegram.env
+sudo systemctl daemon-reload
+```
+
+未設定這兩個變數時，策略仍會執行，但不會發送 Telegram 訊息。
+
 查看執行結果與日誌：
 
 ```bash

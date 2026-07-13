@@ -5,6 +5,7 @@ import json
 import os
 import tempfile
 import uuid
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -105,21 +106,37 @@ def atomic_json_write(path: Path, payload: dict) -> None:
 
 
 def publish_status(payload: dict) -> None:
-    url, token = os.getenv("STATUS_PUSH_URL"), os.getenv("STATUS_PUSH_TOKEN")
-    site_token = os.getenv("STATUS_SITE_TOKEN")
-    if not url or not token or not site_token:
-        print("warning: status push skipped; missing STATUS_PUSH_URL, STATUS_PUSH_TOKEN, or STATUS_SITE_TOKEN")
+    print("info: status push disabled")
+
+
+def send_telegram_event(event: dict) -> None:
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    chat_id = os.getenv("TELEGRAM_CHAT_ID")
+    if not token or not chat_id:
         return
+    lines = [
+        f"📣 {event.get('event_type', 'TRADE')}",
+        f"帳戶：{event.get('account_name') or event.get('account_id', '-')}",
+        f"商品：{event.get('symbol', '-')}",
+        f"策略：{event.get('strategy', '-')}",
+    ]
+    for key, label in (("type", "方向"), ("entry_time", "進場時間"),
+                       ("exit_time", "出場時間"), ("entry_price", "進場價"),
+                       ("exit_price", "出場價"), ("pnl", "損益")):
+        if event.get(key) is not None:
+            lines.append(f"{label}：{event[key]}")
     request = urllib.request.Request(
-        url, json.dumps(payload).encode(), method="POST",
-        headers={"Authorization": f"Bearer {token}", "OAI-Sites-Authorization": f"Bearer {site_token}", "Content-Type": "application/json"},
+        f"https://api.telegram.org/bot{token}/sendMessage",
+        data=urllib.parse.urlencode({"chat_id": chat_id, "text": "\n".join(lines)}).encode(),
+        method="POST",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
             if response.status >= 300:
-                raise RuntimeError(f"status push returned {response.status}")
+                raise RuntimeError(f"Telegram returned {response.status}")
     except Exception as error:
-        print(f"warning: status push failed: {error}")
+        print(f"warning: Telegram notification failed: {error}")
 
 
 def strategy_events(payload: dict, events_path: Path) -> list[dict]:
@@ -333,8 +350,11 @@ def main() -> None:
         "snapshot": snapshot,
     }
     events_path = Path(args.events_path)
-    append_jsonl(events_path, strategy_events(payload, events_path))
+    events = strategy_events(payload, events_path)
+    append_jsonl(events_path, events)
     atomic_json_write(state_path, payload)
+    for event in events:
+        send_telegram_event(event)
     publish_status(payload)
     print(json.dumps(payload, ensure_ascii=False))
 

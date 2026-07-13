@@ -13,6 +13,7 @@ Environment=ACCOUNT_ID=paper-nfe-v2
 Environment=RISK_PCT=0.05
 Environment=MAX_LEVERAGE=1000
 Environment=START_AT=2026-07-01T00:00:00Z
+EnvironmentFile=-/etc/v8_project/telegram.env
 ExecStart=/opt/v8_project/.venv/bin/python oracle_strategy_job.py --account-id ${ACCOUNT_ID} --account-name "NFE V2 主帳戶" --strategy ${STRATEGY} --risk-pct ${RISK_PCT} --max-leverage ${MAX_LEVERAGE} --min-strategy-amount 100 --start-at ${START_AT} --state-path runtime/accounts/${ACCOUNT_ID}/state.json --forward-start-path runtime/accounts/${ACCOUNT_ID}/forward_start.json --events-path runtime/accounts/${ACCOUNT_ID}/events.jsonl
 TimeoutStartSec=12min
 Nice=10

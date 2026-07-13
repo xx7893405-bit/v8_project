@@ -13,7 +13,7 @@ import pandas as pd
 from api_market_data import ApiFeedConfig, ExchangeApiMarketDataFeed
 from backtest_config import StrategyConfig
 from multi_timeframe_backtest import MultiTimeframeBacktester
-from oracle_strategy_job import build_strategy, classify_decision, publish_status
+from oracle_strategy_job import build_strategy, classify_decision, publish_status, send_telegram_event
 from portfolio_runtime import PortfolioAccount
 
 
@@ -63,6 +63,7 @@ def run_account(config: dict, state_path: Path, events_path: Path) -> dict:
     portfolio = build_portfolio(config, previous)
     snapshots = previous.get("snapshots", {})
     events: list[dict] = []
+    telegram_events: list[dict] = []
     for symbol, values in config["symbols"].items():
         previous_snapshot = snapshots.get(symbol)
         resume_snapshot = copy.deepcopy(previous_snapshot) if previous_snapshot else None
@@ -98,8 +99,34 @@ def run_account(config: dict, state_path: Path, events_path: Path) -> dict:
         snapshot = backtester.build_runtime_snapshot(
             strategy_config, start_at=start_at, resume_snapshot=resume_snapshot
         )
+        current_position = snapshot.get("active_position")
+        previous_position = previous_snapshot.get("active_position") if previous_snapshot else None
+        if current_position and (
+            not previous_position
+            or current_position.get("entry_time") != previous_position.get("entry_time")
+        ):
+            telegram_events.append(
+                {
+                    "event_type": "ENTRY",
+                    "account_id": config["account_id"],
+                    "account_name": config.get("account_name", config["account_id"]),
+                    "symbol": symbol,
+                    "strategy": values["strategy"],
+                    **current_position,
+                }
+            )
         previous_trade_count = len(previous_snapshot.get("trades", [])) if previous_snapshot else 0
         for trade in snapshot.get("trades", [])[previous_trade_count:]:
+            telegram_events.append(
+                {
+                    "event_type": "TRADE_CLOSED",
+                    "account_id": config["account_id"],
+                    "account_name": config.get("account_name", config["account_id"]),
+                    "symbol": symbol,
+                    "strategy": values["strategy"],
+                    **trade,
+                }
+            )
             event = portfolio.apply_realized_pnl(symbol, float(trade.get("pnl", 0.0)))
             if event:
                 event.update({"account_id": config["account_id"], "detected_at": datetime.now(timezone.utc).isoformat()})
@@ -142,6 +169,8 @@ def run_account(config: dict, state_path: Path, events_path: Path) -> dict:
         },
     }
     atomic_json_write(state_path, payload)
+    for event in telegram_events:
+        send_telegram_event(event)
     publish_status(payload)
     return payload
 

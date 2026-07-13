@@ -8,7 +8,7 @@ Type=oneshot
 User=ubuntu
 WorkingDirectory=/opt/v8_project
 Environment=PYTHONUNBUFFERED=1
-PassEnvironment=STATUS_PUSH_URL STATUS_PUSH_TOKEN STATUS_SITE_TOKEN
+EnvironmentFile=-/etc/v8_project/telegram.env
 ExecStart=/opt/v8_project/.venv/bin/python portfolio_strategy_job.py --config runtime/accounts/%i/config.json --state-path runtime/accounts/%i/portfolio_state.json --events-path runtime/accounts/%i/portfolio_events.jsonl
 TimeoutStartSec=12min
 Nice=10
