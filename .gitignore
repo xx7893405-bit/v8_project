@@ -60,3 +60,13 @@ deploy/macos/ssh-key-*.key
 202507-2607/
 202407-2607_continuous/
 未命名檔案夾/
+
+# Local agent workspaces and disposable research artifacts
+/.agents/
+/.worktrees/
+/data/backtests/
+/video_analysis_*/
+/video_source_*/
+/*.mp4
+/*_chart.png
+/202101-202607_merged/*_curve.svg
