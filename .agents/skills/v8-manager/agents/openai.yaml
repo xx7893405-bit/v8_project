@@ -1,4 +1,4 @@
 interface:
-  display_name: "V8 Manager"
-  short_description: "Coordinate V8 agents, worktrees, ownership, and validation"
-  default_prompt: "Use $v8-manager to coordinate this V8 project change across the appropriate agents and worktrees."
+  display_name: "V8 Stateless Manager"
+  short_description: "Rebuild repo state and coordinate isolated V8 agents"
+  default_prompt: "Use $v8-manager to rebuild the current repository state, then coordinate this V8 project change."

@@ -18,7 +18,8 @@
 - 使用者點名 Manager／主管／多 Agent，或任務同時影響兩個以上核心區塊時，主 Agent 必須使用 `.agents/skills/v8-manager/SKILL.md`。
 - Manager 可依該技能自動建立或選用隔離 worktree，並分派最多三個互不重疊的執行 Agent；相依工作採階段式順序執行。
 - 每個寫入 Agent 必須有明確 ownership、禁止修改範圍、固定介面、驗收測試與交付 commit。
-- Manager 專責整合、完整驗證及維護 `docs/agent-management/`；執行 Agent 不得自行修改管理狀態或共用契約。
+- Manager 採無狀態模式；每次開始必須先讀取 `PROJECT_STATE.md`、`TASK_BOARD.md`、`AGENTS.md`、`docs/ADR/`、最新 commits 與所有 worktree 狀態，完成前不得修改或分派。
+- Manager 專責整合、完整驗證及維護 `PROJECT_STATE.md`、`TASK_BOARD.md`、`docs/ADR/`；執行 Agent 不得自行修改管理狀態或共用契約。
 - 專案檔案、Git 狀態、測試與可重現回測是事實來源；對話上下文只作輔助。
 
 ## 變更前確認

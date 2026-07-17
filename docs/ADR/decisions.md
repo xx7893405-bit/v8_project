@@ -1,20 +1,20 @@
 # Architecture Decisions
 
-## ADR-001: Repository-backed Manager state
+## ADR-001: Stateless Manager
 
 Status: Accepted
 
-Decision: 以 `docs/agent-management/`、Git 與測試保存有效狀態，Manager 對話可替換。
+Decision: Manager 不保存對話狀態；每次先讀 `PROJECT_STATE.md`、`TASK_BOARD.md`、`AGENTS.md`、`docs/ADR/`、Git 與 worktree，再規劃或分派。
 
-Consequence: 新 Manager 必須先從 repo 重建狀態，不得依舊對話直接續寫。
+Consequence: 主管 thread 可隨時替換；repository、Git 與測試是唯一長期記憶。
 
 ## ADR-002: Exclusive worktree ownership
 
 Status: Accepted
 
-Decision: 每個寫入 Agent 使用獨立 worktree 與互斥檔案 ownership；Manager 專責整合。
+Decision: 每個寫入 worker 使用獨立 worktree 與互斥檔案 ownership；Manager 專責整合。
 
-Consequence: 跨 ownership 的介面需求先回報，不由執行 Agent 直接修改。
+Consequence: 跨 ownership 的介面需求先回報，不由 worker 直接修改。
 
 ## ADR-003: Contracts before parallel implementation
 
@@ -44,6 +44,6 @@ Consequence: 任一假設不同都必須揭露，不以單次高報酬直接判�
 
 Status: Accepted
 
-Decision: 任務跨兩個以上獨立區塊時，`v8-manager` 自動分派最多三個平行 Agent；單一區塊或高耦合工作直接處理或序列執行。
+Decision: 任務跨兩個以上獨立區塊時，Manager 自動分派最多三個平行 worker；單一區塊或高耦合工作直接處理或序列執行。
 
-Consequence: 使用者不必為每次局部調整建立新主管，但 Manager 必須維持互斥 ownership 與階段間依賴。
+Consequence: 使用者不必維持永久主管 thread，但 Manager 必須維持互斥 ownership 與階段依賴。
