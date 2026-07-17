@@ -1,0 +1,4 @@
+interface:
+  display_name: "V8 Manager"
+  short_description: "Coordinate V8 agents, worktrees, ownership, and validation"
+  default_prompt: "Use $v8-manager to coordinate this V8 project change across the appropriate agents and worktrees."

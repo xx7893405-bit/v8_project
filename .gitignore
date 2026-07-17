@@ -62,7 +62,11 @@ deploy/macos/ssh-key-*.key
 未命名檔案夾/
 
 # Local agent workspaces and disposable research artifacts
-/.agents/
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/v8-manager/
+!/.agents/skills/v8-manager/**
 /.worktrees/
 /data/backtests/
 /video_analysis_*/
