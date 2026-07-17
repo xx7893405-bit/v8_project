@@ -3,10 +3,10 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from felisa_confluence_strategy import FelisaConfluenceStrategy
+from bears_strategy import BearSStrategy
 
 
-class FelisaConfluenceStrategyTest(unittest.TestCase):
+class BearSStrategyTest(unittest.TestCase):
     def test_htf_state_is_delayed_and_unchanged_by_future_bars(self):
         index = pd.date_range("2026-01-01", periods=40, freq="4h")
         close = 100 + np.sin(np.arange(40) * np.pi / 3) * 10 + np.arange(40) * 0.2
@@ -20,7 +20,7 @@ class FelisaConfluenceStrategyTest(unittest.TestCase):
             },
             index=index,
         )
-        strategy = FelisaConfluenceStrategy(swing_n=2)
+        strategy = BearSStrategy(swing_n=2)
         prefix = strategy._precompute_htf_states(frame.iloc[:30])
         full = strategy._precompute_htf_states(frame)
 
@@ -28,7 +28,7 @@ class FelisaConfluenceStrategyTest(unittest.TestCase):
         pd.testing.assert_series_equal(prefix.iloc[-1], full.loc[prefix.index[-1]], check_names=False)
 
     def test_confluence_selects_nearest_fibonacci_level(self):
-        strategy = FelisaConfluenceStrategy()
+        strategy = BearSStrategy()
         state = pd.Series(
             {
                 "trend": "LONG",
@@ -49,7 +49,7 @@ class FelisaConfluenceStrategyTest(unittest.TestCase):
         self.assertTrue(setup["triple"])
 
     def test_long_rejection_requires_bullish_close(self):
-        strategy = FelisaConfluenceStrategy(wick_body_ratio=1.5)
+        strategy = BearSStrategy(wick_body_ratio=1.5)
         prev = pd.Series({"open": 100, "close": 101, "volume": 100})
         bullish = pd.Series({"open": 100, "high": 103, "low": 96, "close": 102, "volume": 90})
         bearish = pd.Series({"open": 102, "high": 103, "low": 96, "close": 100, "volume": 90})

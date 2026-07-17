@@ -9,7 +9,7 @@ from backtest_config import RunConfig
 from strategy_base import StrategyDecision
 
 
-class FelisaConfluenceStrategy:
+class BearSStrategy:
     """4H 趨勢線與斐波那契重合，1H 收線確認後回踩進場。"""
 
     def __init__(
@@ -231,7 +231,7 @@ class FelisaConfluenceStrategy:
         if order is not None:
             strength = "TRIPLE" if setup["triple"] else "DOUBLE"
             fib = str(setup["ratio"]).replace(".", "")
-            order["entry_mode"] = f"FELISA_{side}_FIB_{fib}_{strength}"
+            order["entry_mode"] = f"BEARS_{side}_FIB_{fib}_{strength}"
             order["fib_ratio"] = setup["ratio"]
             order["triple_confluence"] = setup["triple"]
             return StrategyDecision(retrace_order=order)

@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from felisa_confluence_strategy import FelisaConfluenceStrategy
+from bears_strategy import BearSStrategy
 from multi_timeframe_backtest import MultiTimeframeBacktester, StrategyConfig
 from nfe_v4_strategy import NFEV4Strategy
 
 
 DATA_DIR = Path("202101-202607_merged")
-REPORT_DIR = Path("data/backtests/felisa_confluence_20260717")
+REPORT_DIR = Path("data/backtests/bears_20260717")
 
 
 def config() -> StrategyConfig:
@@ -102,7 +102,7 @@ def main() -> None:
         ),
         cfg,
     )
-    candidate = run("candidate_felisa", FelisaConfluenceStrategy(), cfg)
+    candidate = run("candidate_bears", BearSStrategy(), cfg)
     baseline_metrics = baseline["metrics"]
     candidate_metrics = candidate["metrics"]
     drawdown_worsening = abs(candidate_metrics["max_drawdown_pct"]) - abs(baseline_metrics["max_drawdown_pct"])
@@ -116,7 +116,7 @@ def main() -> None:
     if abs(trade_count_change) >= 0.20:
         alerts.append("TRADE_COUNT_CHANGED_20PCT")
     comparison = {
-        "command": "python3 run_felisa_confluence_backtest.py",
+        "command": "python3 run_bears_backtest.py",
         "config": asdict(cfg),
         "baseline": baseline,
         "candidate": candidate,
