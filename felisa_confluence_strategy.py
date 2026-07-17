@@ -229,7 +229,9 @@ class FelisaConfluenceStrategy:
             net_sl_dist,
         )
         if order is not None:
-            order["entry_mode"] = f"FELISA_{side}"
+            strength = "TRIPLE" if setup["triple"] else "DOUBLE"
+            fib = str(setup["ratio"]).replace(".", "")
+            order["entry_mode"] = f"FELISA_{side}_FIB_{fib}_{strength}"
             order["fib_ratio"] = setup["ratio"]
             order["triple_confluence"] = setup["triple"]
             return StrategyDecision(retrace_order=order)
