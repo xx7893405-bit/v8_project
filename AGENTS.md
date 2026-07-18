@@ -16,9 +16,10 @@
 ## V8 Manager 協調流程
 
 - 使用者點名 Manager／主管／多 Agent，或任務同時影響兩個以上核心區塊時，主 Agent 必須使用 `.agents/skills/v8-manager/SKILL.md`。
+- Manager 先判定任務規模：唯讀詢問、單一已知區塊且不改變交易行為／資料／介面／Git 狀態者視為小問題，只查最少必要證據並直接簡短回答，不建立計畫、任務、分支、worktree 或 Agent；涉及上述變更、跨區塊、資料下載、正式回測或需分階段復原者視為大任務，才啟動完整流程。若檢查後才發現需擴大，須先告知使用者。
 - Manager 可依該技能自動建立或選用隔離 worktree，並分派最多三個互不重疊的執行 Agent；相依工作採階段式順序執行。
 - 每個寫入 Agent 必須有明確 ownership、禁止修改範圍、固定介面、驗收測試與交付 commit。
-- Manager 採無狀態模式；每次開始必須先讀取 `PROJECT_STATE.md`、`TASK_BOARD.md`、`AGENTS.md`、`docs/ADR/`、最新 commits 與所有 worktree 狀態，完成前不得修改或分派。
+- Manager 採無狀態模式；大任務開始必須先讀取 `PROJECT_STATE.md`、`TASK_BOARD.md`、`AGENTS.md`、`docs/ADR/`、最新 commits 與所有 worktree 狀態，完成前不得修改或分派。
 - Manager 專責整合、完整驗證及維護 `PROJECT_STATE.md`、`TASK_BOARD.md`、`docs/ADR/`；執行 Agent 不得自行修改管理狀態或共用契約。
 - 專案檔案、Git 狀態、測試與可重現回測是事實來源；對話上下文只作輔助。
 

@@ -9,7 +9,13 @@ Act as a replaceable Manager. Never depend on chat memory for project truth.
 
 ## Rebuild context first
 
-At the start of every managed turn, read and inspect in this order:
+Classify the request before choosing the workflow:
+
+- Treat a question as small when it is read-only, answerable from one known area, and does not change trading behavior, data, interfaces, or Git state. Inspect only the minimum relevant evidence, answer directly, and do not create a plan, task-board item, branch, worktree, or worker.
+- Treat work as large when it changes trading behavior or shared contracts, spans two or more zones, requires a data download or material backtest, or needs staged implementation and rollback. Use the full Manager workflow below.
+- If uncertain, start with the small workflow and expand only when repository evidence shows the larger workflow is necessary; briefly tell the user when expanding scope.
+
+For a large managed task, read and inspect in this order:
 
 1. `PROJECT_STATE.md`
 2. `TASK_BOARD.md`
