@@ -133,6 +133,7 @@ class NFEV2Strategy(NFEDoubleLevelStrategy):
                                 )
                                 if order is not None:
                                     order["entry_mode"] = "NFE_DL_LONG"
+                                    order["live_tp2"] = None
                                     return StrategyDecision(retrace_order=order)
                                 if miss is not None:
                                     return StrategyDecision(missed=[miss])
@@ -204,6 +205,7 @@ class NFEV2Strategy(NFEDoubleLevelStrategy):
                                             ]
                                         )
                                     order["entry_mode"] = "NFE_DL_SHORT"
+                                    order["live_tp2"] = None
                                     return StrategyDecision(retrace_order=order)
                                 if miss is not None:
                                     return StrategyDecision(missed=[miss])
@@ -257,6 +259,5 @@ class NFEV2Strategy(NFEDoubleLevelStrategy):
                 # 止損只能往下移，不能往上移
                 if new_sl < current_sl:
                     active_position["sl"] = new_sl
-        except Exception:
-            # 防禦性 try-catch，確保猴子補丁在任何數據對齊錯誤下都不會崩潰回測
-            pass
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise RuntimeError("NFE V2 trailing-stop update failed") from exc

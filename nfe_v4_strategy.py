@@ -145,6 +145,8 @@ class NFEV4Strategy(NFEDoubleLevelStrategy):
                                 if order is not None:
                                     order["entry_mode"] = "NFE_DL_LONG"
                                     order["is_defensive"] = is_defensive
+                                    if is_defensive:
+                                        order["live_tp2"] = None
                                     return StrategyDecision(retrace_order=order)
                                 if miss is not None:
                                     return StrategyDecision(missed=[miss])
@@ -229,6 +231,8 @@ class NFEV4Strategy(NFEDoubleLevelStrategy):
                                         )
                                     order["entry_mode"] = "NFE_DL_SHORT"
                                     order["is_defensive"] = is_defensive
+                                    if is_defensive:
+                                        order["live_tp2"] = None
                                     return StrategyDecision(retrace_order=order)
                                 if miss is not None:
                                     return StrategyDecision(missed=[miss])
@@ -274,5 +278,5 @@ class NFEV4Strategy(NFEDoubleLevelStrategy):
                 new_sl = latest_sh_point["high"] + padding
                 if new_sl < current_sl:
                     active_position["sl"] = new_sl
-        except Exception:
-            pass
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise RuntimeError("NFE V4 trailing-stop update failed") from exc

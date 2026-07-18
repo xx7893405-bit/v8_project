@@ -28,6 +28,8 @@ class ExecutionResult:
     status: str
     exchange_order_id: Optional[str] = None
     message: str = ""
+    filled_quantity: float = 0.0
+    average_price: Optional[float] = None
 
 
 class DryRunExecutionClient:
@@ -40,6 +42,9 @@ class DryRunExecutionClient:
         )
 
     def cancel_all(self) -> None:
+        return None
+
+    def cancel_order(self, order_id: str) -> None:
         return None
 
     def get_position(self) -> Optional[dict]:
@@ -158,13 +163,20 @@ class CcxtExecutionClient:
             status=str(result.get("status") or "accepted").upper(),
             exchange_order_id=str(result.get("id")) if result.get("id") else None,
             message=f"{self.exchange_name} {order_type} {ccxt_side} {amount}",
+            filled_quantity=float(result.get("filled") or 0.0) * float(self.market.get("contractSize") or 1.0),
+            average_price=float(result.get("average") or 0.0) or None,
         )
 
     def cancel_all(self) -> None:
         self.exchange.cancel_all_orders(self.symbol)
 
+    def cancel_order(self, order_id: str) -> None:
+        self.exchange.cancel_order(order_id, self.symbol)
+
     def get_open_orders(self) -> list[dict]:
-        return self.exchange.fetch_open_orders(self.symbol)
+        contract_size = float(self.market.get("contractSize") or 1.0)
+        orders = self.exchange.fetch_open_orders(self.symbol)
+        return [{**order, "quantity": float(order.get("amount") or 0.0) * contract_size} for order in orders]
 
     def get_position(self) -> Optional[dict]:
         positions = self.exchange.fetch_positions([self.symbol])
@@ -200,6 +212,15 @@ class LiveExecutionEngine:
         existing = self.client.get_position()
         if existing is not None:
             if existing.get("type") == position.get("type"):
+                expected_size = float(position.get("remaining_size", position["size"]))
+                actual_size = float(existing.get("size") or 0.0)
+                tolerance = max(1e-12, expected_size * 1e-6)
+                if abs(expected_size - actual_size) > tolerance:
+                    return ExecutionResult(
+                        accepted=False,
+                        status="POSITION_SIZE_MISMATCH",
+                        message=f"Exchange size {actual_size} differs from strategy size {expected_size}; entry skipped.",
+                    )
                 return ExecutionResult(
                     accepted=True,
                     status="ALREADY_IN_SYNC",
@@ -210,6 +231,13 @@ class LiveExecutionEngine:
                 status="POSITION_CONFLICT",
                 message="An opposite exchange position exists; manual reconciliation required.",
             )
+        entry_tag = str(position.get("live_entry_tag") or f"entry:{position.get('entry_mode', 'UNKNOWN')}")[:32]
+        if any(self._client_tag(order) == entry_tag for order in self.client.get_open_orders()):
+            return ExecutionResult(
+                accepted=True,
+                status="ENTRY_PENDING",
+                message="The entry order already exists; duplicate submission skipped.",
+            )
         order_type = "market" if position.get("entry_mode") == "BREAKOUT" else "limit"
         return self.client.submit_order(
             ExecutionOrder(
@@ -218,45 +246,150 @@ class LiveExecutionEngine:
                 quantity=float(position["size"]),
                 price=float(position["entry_price"]),
                 leverage=float(position.get("leverage") or 0) or None,
-                client_tag=f"entry:{position.get('entry_mode', 'UNKNOWN')}",
+                client_tag=entry_tag,
             )
         )
 
-    def submit_exit_orders(self, position: dict) -> list[ExecutionResult]:
+    @staticmethod
+    def _client_tag(order: dict) -> str:
+        return str(
+            order.get("clientOrderId")
+            or order.get("client_order_id")
+            or order.get("info", {}).get("clientOrderId")
+            or ""
+        )
+
+    @staticmethod
+    def _order_size(order: dict) -> float:
+        return float(order.get("quantity") or order.get("amount") or order.get("info", {}).get("origQty") or 0.0)
+
+    @staticmethod
+    def _order_level(order: dict, *, stop: bool) -> float:
+        info = order.get("info", {})
+        value = (
+            order.get("stopPrice") or order.get("triggerPrice") or info.get("stopPrice") or info.get("triggerPrice")
+            if stop
+            else order.get("price") or info.get("price")
+        )
+        return float(value or 0.0)
+
+    @staticmethod
+    def _matches(order: dict, quantity: float, level: float, *, stop: bool) -> bool:
+        if LiveExecutionEngine._order_size(order) == 0.0 and LiveExecutionEngine._order_level(order, stop=stop) == 0.0:
+            # Some adapters omit normalized fields; the stable client tag is then
+            # the only safe idempotency key and is preferable to duplicating exits.
+            return True
+        tolerance = max(1e-9, abs(quantity) * 1e-6)
+        price_tolerance = max(1e-8, abs(level) * 1e-8)
+        return (
+            abs(LiveExecutionEngine._order_size(order) - quantity) <= tolerance
+            and abs(LiveExecutionEngine._order_level(order, stop=stop) - level) <= price_tolerance
+        )
+
+    def _replace_if_needed(self, existing: Optional[dict], order: ExecutionOrder, *, stop: bool) -> list[ExecutionResult]:
+        level = float(order.stop_price if stop else order.price)
+        if existing is not None and self._matches(existing, order.quantity, level, stop=stop):
+            return []
+        if existing is not None:
+            order_id = existing.get("id") or existing.get("order_id")
+            if not order_id or not hasattr(self.client, "cancel_order"):
+                return [ExecutionResult(False, "PROTECTION_CONFLICT", message=f"Cannot amend {order.client_tag} without an order id.")]
+            self.client.cancel_order(str(order_id))
+        return [self.client.submit_order(order)]
+
+    def _cancel_if_present(self, existing: Optional[dict]) -> list[ExecutionResult]:
+        if existing is None:
+            return []
+        order_id = existing.get("id") or existing.get("order_id")
+        if not order_id or not hasattr(self.client, "cancel_order"):
+            return [ExecutionResult(False, "PROTECTION_CONFLICT", message="Cannot cancel stale protection without an order id.")]
+        self.client.cancel_order(str(order_id))
+        return []
+
+    def submit_exit_orders(self, position: dict, actual_position: Optional[dict] = None) -> list[ExecutionResult]:
+        if actual_position is None and hasattr(self.client, "get_position"):
+            actual_position = self.client.get_position()
+            if actual_position is None:
+                return []
+        actual_position = actual_position or position
+        if actual_position.get("type") != position.get("type"):
+            return [ExecutionResult(False, "POSITION_CONFLICT", message="Protective orders require a matching exchange position.")]
+
         exit_side = "SHORT" if position["type"] == "LONG" else "LONG"
         open_orders = getattr(self.client, "get_open_orders", lambda: [])()
-        tags = {
-            str(order.get("clientOrderId") or order.get("client_order_id") or order.get("info", {}).get("clientOrderId") or "")
-            for order in open_orders
-        }
+        by_tag = {self._client_tag(order): order for order in open_orders}
+        quantity = float(actual_position.get("size") or 0.0)
+        if quantity <= 0:
+            return []
         results = []
-        if "protective-stop" not in tags:
-            results.append(
-                self.client.submit_order(
-                    ExecutionOrder(
-                        side=exit_side,
-                        order_type="stop",
-                        quantity=float(position["size"]),
-                        stop_price=float(position["sl"]),
-                        reduce_only=True,
-                        leverage=float(position.get("leverage") or 0) or None,
-                        client_tag="protective-stop",
-                    )
-                )
+        stop_order = ExecutionOrder(
+            side=exit_side,
+            order_type="stop",
+            quantity=quantity,
+            stop_price=float(position["sl"]),
+            reduce_only=True,
+            leverage=float(position.get("leverage") or 0) or None,
+            client_tag="protective-stop",
+        )
+        results.extend(self._replace_if_needed(by_tag.get("protective-stop"), stop_order, stop=True))
+
+        tp1_quantity = 0.0
+        if not position.get("tp1_realized", False) and float(position.get("tp1_close_pct") or 0.0) > 0:
+            tp1_quantity = min(quantity, float(position["size"]) * float(position["tp1_close_pct"]))
+            tp1_order = ExecutionOrder(
+                side=exit_side,
+                order_type="limit",
+                quantity=tp1_quantity,
+                price=float(position["tp1"]),
+                reduce_only=True,
+                leverage=float(position.get("leverage") or 0) or None,
+                client_tag="take-profit-1",
             )
-        if float(position.get("tp2", 0.0)) > 0:
-            if "take-profit" not in tags:
-                results.append(
-                    self.client.submit_order(
-                        ExecutionOrder(
-                            side=exit_side,
-                            order_type="limit",
-                            quantity=float(position["size"]),
-                            price=float(position["tp2"]),
-                            reduce_only=True,
-                            leverage=float(position.get("leverage") or 0) or None,
-                            client_tag="take-profit",
-                        )
-                    )
-                )
+            results.extend(self._replace_if_needed(by_tag.get("take-profit-1"), tp1_order, stop=False))
+        else:
+            results.extend(self._cancel_if_present(by_tag.get("take-profit-1")))
+
+        live_tp2 = position.get("live_tp2", position.get("tp2"))
+        if live_tp2 is not None and float(live_tp2) > 0:
+            tp2_quantity = quantity - tp1_quantity
+            if tp2_quantity <= 0:
+                return results
+            tp2_order = ExecutionOrder(
+                side=exit_side,
+                order_type="limit",
+                quantity=tp2_quantity,
+                price=float(live_tp2),
+                reduce_only=True,
+                leverage=float(position.get("leverage") or 0) or None,
+                client_tag="take-profit",
+            )
+            results.extend(self._replace_if_needed(by_tag.get("take-profit"), tp2_order, stop=False))
+        else:
+            results.extend(self._cancel_if_present(by_tag.get("take-profit")))
         return results
+
+    def reconcile_position(self, position: dict, *, allow_entry: bool) -> tuple[ExecutionResult, list[ExecutionResult]]:
+        actual = self.client.get_position()
+        size_matches = False
+        if actual is None and allow_entry:
+            entry_result = self.submit_entry_from_position(position)
+            actual = self.client.get_position()
+        elif actual is None:
+            entry_result = ExecutionResult(False, "ENTRY_NOT_AUTHORIZED", message="Restart reconciliation will not recreate an absent entry.")
+        elif actual.get("type") != position.get("type"):
+            entry_result = ExecutionResult(False, "POSITION_CONFLICT", message="Opposite exchange position requires manual reconciliation.")
+        else:
+            expected = float(position.get("remaining_size", position["size"]))
+            actual_size = float(actual.get("size") or 0.0)
+            size_matches = abs(expected - actual_size) <= max(1e-12, expected * 1e-6)
+            status = "ALREADY_IN_SYNC" if size_matches else "POSITION_SIZE_MISMATCH"
+            entry_result = ExecutionResult(status == "ALREADY_IN_SYNC", status, message=f"strategy={expected} exchange={actual_size}")
+        managed_position = bool(position.get("live_entry_tag")) or allow_entry
+        exits = (
+            self.submit_exit_orders(position, actual)
+            if actual is not None
+            and actual.get("type") == position.get("type")
+            and (size_matches or managed_position)
+            else []
+        )
+        return entry_result, exits

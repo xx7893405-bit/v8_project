@@ -43,19 +43,6 @@ class NFEV3Strategy(NFEDoubleLevelStrategy):
         balance: float,
         cfg: RunConfig,
     ) -> StrategyDecision:
-        # 在初次呼叫時，為 backtester 進行猴子補丁，插入空單的結構性移動止損邏輯
-        if self.use_trailing_stop_short and not hasattr(backtester, "_manage_active_position_patched"):
-            original_manage = backtester._manage_active_position
-            
-            def patched_manage(active_position, curr_series, curr_time_val, prev_time_val, loop_index, current_balance, trades_list, run_cfg):
-                # 只有空單 (SHORT) 時，才執行 V2 的結構性移動止損更新
-                if active_position is not None and active_position["type"] == "SHORT":
-                    self._update_short_trailing_stop(active_position, backtester, curr_time_val)
-                return original_manage(active_position, curr_series, curr_time_val, prev_time_val, loop_index, current_balance, trades_list, run_cfg)
-                
-            backtester._manage_active_position = patched_manage
-            backtester._manage_active_position_patched = True
-
         if self.precomputed_htf_df is None:
             if self.htf == "1h":
                 df_htf = backtester.df_1h
@@ -217,11 +204,16 @@ class NFEV3Strategy(NFEDoubleLevelStrategy):
                                             ]
                                         )
                                     order["entry_mode"] = "NFE_DL_SHORT"
+                                    order["live_tp2"] = None
                                     return StrategyDecision(retrace_order=order)
                                 if miss is not None:
                                     return StrategyDecision(missed=[miss])
 
         return StrategyDecision()
+
+    def after_manage_position(self, active_position, backtester, curr_time):
+        if self.use_trailing_stop_short and active_position.get("type") == "SHORT":
+            self._update_short_trailing_stop(active_position, backtester, curr_time)
 
     def sl_padding_mult_for_short(self, atr: float) -> float:
         return self.sl_padding_atr_mult_short
@@ -259,5 +251,5 @@ class NFEV3Strategy(NFEDoubleLevelStrategy):
                 # 止損只能往下移
                 if new_sl < current_sl:
                     active_position["sl"] = new_sl
-        except Exception:
-            pass
+        except (KeyError, IndexError, TypeError, ValueError) as exc:
+            raise RuntimeError("NFE V3 trailing-stop update failed") from exc

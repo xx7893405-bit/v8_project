@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
+from datetime import datetime, timezone
+from pathlib import Path
 
 from api_market_data import ApiFeedConfig, ExchangeApiMarketDataFeed
+from backtest_config import StrategyConfig
 from execution_engine import CcxtExecutionClient, DryRunExecutionClient, LiveExecutionEngine
-from multi_timeframe_backtest import build_default_strategy
-from oracle_strategy_job import build_strategy
+from oracle_strategy_job import atomic_json_write, build_strategy
 from strategy_engine import MultiTimeframeBacktester
 
 
@@ -26,6 +29,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--min-strategy-amount", type=float, default=100.0)
     parser.add_argument("--max-leverage", type=float, default=3.0)
     parser.add_argument("--margin-mode", choices=["isolated", "cross"], default="isolated")
+    parser.add_argument("--state-path", default="runtime/live_trading_state.json")
     parser.add_argument("--dry-run", dest="dry_run", action="store_true", default=True)
     parser.add_argument("--live", dest="dry_run", action="store_false")
     parser.add_argument("--sandbox", dest="sandbox", action="store_true", default=True)
@@ -41,9 +45,21 @@ def main() -> None:
         raise ValueError("max-leverage must be between 1 and 100")
     if args.min_strategy_amount < 0:
         raise ValueError("min-strategy-amount cannot be negative")
-    strategy = build_default_strategy()
-    strategy = strategy.__class__(**{**strategy.__dict__, "risk_pct": args.risk_pct, "leverage": args.max_leverage, "min_strategy_amount": args.min_strategy_amount})
+    strategy = StrategyConfig(
+        initial_balance=10_000.0,
+        risk_pct=args.risk_pct,
+        leverage=args.max_leverage,
+        min_strategy_amount=args.min_strategy_amount,
+        max_holding_bars=96,
+        mode="NONE",
+        enable_be=True,
+        tp1_close_pct=0.5,
+        be_trigger_ratio=1.5,
+    )
     strategy_impl = build_strategy(args.strategy, args.htf, args.ltf)
+    state_path = Path(args.state_path)
+    previous_payload = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+    previous_snapshot = previous_payload.get("snapshot")
     try:
         feed = ExchangeApiMarketDataFeed(
             ApiFeedConfig(
@@ -57,15 +73,36 @@ def main() -> None:
         backtester = MultiTimeframeBacktester(
             config=strategy.to_backtest_config(), data_feed=feed, strategy=strategy_impl
         )
-        snapshot = backtester.build_runtime_snapshot(strategy)
+        if previous_snapshot is None:
+            signal_df = backtester._get_signal_frame()
+            start_at = signal_df.index[-1] if not signal_df.empty else None
+            snapshot = backtester.build_runtime_snapshot(strategy, start_at=start_at)
+        else:
+            snapshot = backtester.build_runtime_snapshot(strategy, resume_snapshot=previous_snapshot)
     except Exception as exc:
         print(f"live trading prep failed: {exc}")
         return
 
     active_position = snapshot["active_position"]
+    payload = {
+        "evaluated_at": datetime.now(timezone.utc).isoformat(),
+        "market": {"exchange": args.exchange, "symbol": args.ccxt_symbol, "ltf": args.ltf, "htf": args.htf},
+        "strategy": args.strategy,
+        "snapshot": snapshot,
+    }
+    if previous_snapshot is None:
+        atomic_json_write(state_path, payload)
+        print("Initialized live state from the latest closed bar; historical positions were not mirrored.")
+        return
     if active_position is None:
+        atomic_json_write(state_path, payload)
         print("No active simulated position to mirror into live execution.")
         return
+
+    entry_time = str(active_position.get("entry_time") or "unknown")
+    active_position["live_entry_tag"] = f"entry-{active_position['type']}-{''.join(ch for ch in entry_time if ch.isdigit())[-12:]}"[:32]
+    previous_position = previous_snapshot.get("active_position") if previous_snapshot else None
+    is_new_entry = not previous_position or previous_position.get("entry_time") != active_position.get("entry_time")
 
     if args.dry_run:
         client = DryRunExecutionClient()
@@ -76,8 +113,13 @@ def main() -> None:
             args.exchange, args.ccxt_symbol, sandbox=args.sandbox, margin_mode=args.margin_mode
         )
     engine = LiveExecutionEngine(client)
-    entry_result = engine.submit_entry_from_position(active_position)
-    exit_results = engine.submit_exit_orders(active_position)
+    entry_result, exit_results = engine.reconcile_position(active_position, allow_entry=is_new_entry)
+    payload["last_execution"] = {
+        "entry_status": entry_result.status,
+        "entry_order_id": entry_result.exchange_order_id,
+        "exit_statuses": [result.status for result in exit_results],
+    }
+    atomic_json_write(state_path, payload)
 
     print(f"entry: {entry_result.status} {entry_result.message}")
     for result in exit_results:
