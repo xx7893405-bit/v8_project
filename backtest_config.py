@@ -29,7 +29,7 @@ class BacktestConfig:
     maker_fee: float = 0.0002
     taker_fee: float = 0.0005
     max_vol_pct: float = 0.05
-    funding_rate_8h: float = 0.0001
+    funding_rate_8h: float = 0.0001  # Fallback: positive means longs pay, shorts receive.
     max_holding_bars: int = 48
     min_net_profit_r: float = 1.2
     sl_sd_mult: float = 1.2
@@ -77,7 +77,7 @@ class StrategyConfig:
     maker_fee: float = 0.0002
     taker_fee: float = 0.0005
     max_vol_pct: float = 0.05
-    funding_rate_8h: float = 0.0001
+    funding_rate_8h: float = 0.0001  # Fallback: positive means longs pay, shorts receive.
     max_holding_bars: int = 48
     min_net_profit_r: float = 1.2
     sl_sd_mult: float = 1.2

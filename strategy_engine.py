@@ -320,6 +320,9 @@ class MultiTimeframeBacktester:
     def _record_trade(self, active_pos: dict, exit_time: pd.Timestamp, pnl: float, result: str, exit_price: Optional[float] = None, fee: float = 0.0) -> dict:
         if exit_price is None:
             exit_price = active_pos["entry_price"]
+        entry_fee = float(active_pos.get("entry_fee", 0.0))
+        pnl -= entry_fee
+        fee += entry_fee
         return {
             "type": active_pos["type"],
             "entry_time": active_pos["entry_time"],
@@ -376,6 +379,12 @@ class MultiTimeframeBacktester:
         if pos_type == "LONG":
             return max(0.0, exit_price - stop_loss_slippage)
         return exit_price + stop_loss_slippage
+
+    def _apply_market_exit_slippage(self, pos_type: str, exit_price: float) -> float:
+        market_slippage = self.config.slippage_usd * self.price_scale
+        if pos_type == "LONG":
+            return max(0.0, exit_price - market_slippage)
+        return exit_price + market_slippage
 
     def _apply_liquidation_exit_slippage(self, pos_type: str, exit_price: float) -> float:
         liquidation_slippage = self.config.liquidation_slippage_usd * self.price_scale
@@ -765,12 +774,16 @@ class MultiTimeframeBacktester:
             if seq == "B":
                 active_position["tp1_hit"] = True
                 if is_tp2_hit_now:
-                    net_pnl, balance_delta, fee = self._calculate_take_profit_all(active_position)
-                    balance += balance_delta
-                    trades.append(self._record_trade(active_position, curr_time, net_pnl, "TAKE_PROFIT_ALL", exit_price=tp2, fee=fee))
-                    return None, balance
+                    tp2_seq = self._check_1m_sequence(
+                        curr_time, bar_end_time, liquidation_price, tp2,
+                        a_is_low=a_is_low, b_is_high=b_is_high,
+                    )
+                    if tp2_seq == "B":
+                        net_pnl, balance_delta, fee = self._calculate_take_profit_all(active_position)
+                        balance += balance_delta
+                        trades.append(self._record_trade(active_position, curr_time, net_pnl, "TAKE_PROFIT_ALL", exit_price=tp2, fee=fee))
+                        return None, balance
                 balance = self._realize_tp1_partial(active_position, balance)
-                return active_position, balance
 
             slipped_exit_price = self._apply_liquidation_exit_slippage(active_position["type"], liquidation_price)
             net_pnl, balance_delta, fee = self._calculate_market_exit(active_position, slipped_exit_price, self.config.liquidation_fee_rate)
@@ -790,12 +803,16 @@ class MultiTimeframeBacktester:
             if seq == "B":
                 active_position["tp1_hit"] = True
                 if is_tp2_hit_now:
-                    net_pnl, balance_delta, fee = self._calculate_take_profit_all(active_position)
-                    balance += balance_delta
-                    trades.append(self._record_trade(active_position, curr_time, net_pnl, "TAKE_PROFIT_ALL", exit_price=tp2, fee=fee))
-                    return None, balance
+                    tp2_seq = self._check_1m_sequence(
+                        curr_time, bar_end_time, current_sl, tp2,
+                        a_is_low=a_is_low, b_is_high=b_is_high,
+                    )
+                    if tp2_seq == "B":
+                        net_pnl, balance_delta, fee = self._calculate_take_profit_all(active_position)
+                        balance += balance_delta
+                        trades.append(self._record_trade(active_position, curr_time, net_pnl, "TAKE_PROFIT_ALL", exit_price=tp2, fee=fee))
+                        return None, balance
                 balance = self._realize_tp1_partial(active_position, balance)
-                return active_position, balance
 
             slipped_exit_price = self._apply_stop_exit_slippage(active_position["type"], current_sl)
             net_pnl, balance_delta, fee = self._calculate_market_exit(active_position, slipped_exit_price, self.config.taker_fee)
@@ -844,14 +861,13 @@ class MultiTimeframeBacktester:
         current_max_holding = self.config.max_holding_bars * 3 if active_position.get("be_active", False) else self.config.max_holding_bars
         bars_held = loop_index - active_position["entry_idx"]
 
-        if bars_held >= current_max_holding:
-            net_pnl, balance_delta, fee = self._calculate_market_exit(active_position, curr["close"], self.config.taker_fee)
-            balance += balance_delta
-            trades.append(self._record_trade(active_position, curr_time, net_pnl, "TIME_STOP", exit_price=curr["close"], fee=fee))
-            return None, balance
+        time_stop_due = bars_held >= current_max_holding
 
         if curr_time.hour % 8 == 0 and curr_time.minute == 0:
-            active_position["accumulated_funding"] += active_position["size"] * curr["open"] * self.config.funding_rate_8h
+            remaining_size = active_position.get("remaining_size", active_position["size"])
+            direction = 1.0 if active_position["type"] == "LONG" else -1.0
+            # Positive fallback rate means longs pay and shorts receive.
+            active_position["accumulated_funding"] += direction * remaining_size * curr["open"] * self.config.funding_rate_8h
 
         self._update_position_margin_state(active_position)
 
@@ -893,6 +909,12 @@ class MultiTimeframeBacktester:
             if position is not None and activate_be_after_bar:
                 position["be_active"] = True
                 position["sl"] = entry_price
+            if position is not None and time_stop_due:
+                exit_price = self._apply_market_exit_slippage(pos_type, curr["close"])
+                net_pnl, balance_delta, fee = self._calculate_market_exit(position, exit_price, self.config.taker_fee)
+                balance += balance_delta
+                trades.append(self._record_trade(position, curr_time, net_pnl, "TIME_STOP", exit_price=exit_price, fee=fee))
+                return None, balance
             return position, balance
 
         is_liq_hit = use_liquidation and curr["high"] >= liquidation_price
@@ -918,6 +940,12 @@ class MultiTimeframeBacktester:
         if position is not None and activate_be_after_bar:
             position["be_active"] = True
             position["sl"] = entry_price
+        if position is not None and time_stop_due:
+            exit_price = self._apply_market_exit_slippage(pos_type, curr["close"])
+            net_pnl, balance_delta, fee = self._calculate_market_exit(position, exit_price, self.config.taker_fee)
+            balance += balance_delta
+            trades.append(self._record_trade(position, curr_time, net_pnl, "TIME_STOP", exit_price=exit_price, fee=fee))
+            return None, balance
         return position, balance
 
     def _signal_bar_end_time(self, start_time: pd.Timestamp) -> pd.Timestamp:
@@ -939,7 +967,6 @@ class MultiTimeframeBacktester:
 
         o_type = pending_retest_order["type"]
         limit_price = pending_retest_order.get("limit_price", pending_retest_order["entry_price"])
-        sl_p = pending_retest_order["sl"]
 
         if (loop_index - pending_retest_order["created_idx"]) > 72:
             missed_trades.append(
@@ -960,49 +987,21 @@ class MultiTimeframeBacktester:
             return pending_retest_order, active_position, balance
 
         if o_type == "LONG":
-            # 保守處理同棒穿越 entry 與 stop 的情況，避免回測高估掛單品質。
-            if curr["low"] <= sl_p:
-                missed_trades.append(
-                    self._record_missed(
-                        "LONG",
-                        curr_time,
-                        "SETUP_INVALIDATED_BEFORE_FILL",
-                        entry_price=limit_price,
-                        sl=sl_p,
-                        tp1=pending_retest_order["tp1"],
-                        tp2=pending_retest_order["tp2"],
-                        rr=pending_retest_order["rr_potential"],
-                    )
-                )
-                return None, active_position, balance
             if curr["low"] <= limit_price:
                 active_position = pending_retest_order
                 active_position["entry_idx"] = loop_index
                 active_position["entry_time"] = curr_time
-                balance -= (active_position["size"] * active_position["entry_price"]) * self.config.maker_fee
+                active_position["entry_fee"] = (active_position["size"] * active_position["entry_price"]) * self.config.maker_fee
+                balance -= active_position["entry_fee"]
                 return None, active_position, balance
             return pending_retest_order, active_position, balance
 
-        # 對空單採相同保守規則，避免同棒先碰停損卻被算成成交。
-        if curr["high"] >= sl_p:
-            missed_trades.append(
-                self._record_missed(
-                    "SHORT",
-                    curr_time,
-                    "SETUP_INVALIDATED_BEFORE_FILL",
-                    entry_price=limit_price,
-                    sl=sl_p,
-                    tp1=pending_retest_order["tp1"],
-                    tp2=pending_retest_order["tp2"],
-                    rr=pending_retest_order["rr_potential"],
-                )
-            )
-            return None, active_position, balance
         if curr["high"] >= limit_price:
             active_position = pending_retest_order
             active_position["entry_idx"] = loop_index
             active_position["entry_time"] = curr_time
-            balance -= (active_position["size"] * active_position["entry_price"]) * self.config.maker_fee
+            active_position["entry_fee"] = (active_position["size"] * active_position["entry_price"]) * self.config.maker_fee
+            balance -= active_position["entry_fee"]
             return None, active_position, balance
         return pending_retest_order, active_position, balance
 
@@ -1154,7 +1153,8 @@ class MultiTimeframeBacktester:
                 position, missed = self._build_breakout_position(pending_breakout_order, execution_curr, curr_time, balance, cfg)
                 if position is not None:
                     active_position = position
-                    balance -= (position["size"] * position["entry_price"]) * self.config.taker_fee
+                    position["entry_fee"] = (position["size"] * position["entry_price"]) * self.config.taker_fee
+                    balance -= position["entry_fee"]
                 elif missed is not None:
                     missed_trades.append(missed)
                 pending_breakout_order = None
@@ -1167,6 +1167,7 @@ class MultiTimeframeBacktester:
                 if callable(after_manage):
                     after_manage(active_position, self, curr_time)
 
+            had_position_before_retest = active_position is not None
             pending_retest_order, active_position, balance = self._handle_pending_retest_order(
                 pending_retest_order,
                 active_position,
@@ -1176,6 +1177,12 @@ class MultiTimeframeBacktester:
                 balance,
                 missed_trades,
             )
+            if not had_position_before_retest and active_position is not None and active_position.get("entry_idx") == i:
+                active_position, balance = self._manage_active_position(
+                    active_position, execution_curr, curr_time, bar_end_time, i, balance, trades, cfg
+                )
+                if active_position is None:
+                    continue
 
             if (
                 cfg.allow_new_entries
@@ -1195,9 +1202,10 @@ class MultiTimeframeBacktester:
 
         if force_close_at_end and active_position is not None:
             last_bar = self._execution_bar(df.iloc[-1])
-            net_pnl, balance_delta, fee = self._calculate_market_exit(active_position, last_bar["close"], self.config.taker_fee)
+            exit_price = self._apply_market_exit_slippage(active_position["type"], last_bar["close"])
+            net_pnl, balance_delta, fee = self._calculate_market_exit(active_position, exit_price, self.config.taker_fee)
             balance += balance_delta
-            trades.append(self._record_trade(active_position, df.index[-1], net_pnl, "FORCE_CLOSE", exit_price=last_bar["close"], fee=fee))
+            trades.append(self._record_trade(active_position, df.index[-1], net_pnl, "FORCE_CLOSE", exit_price=exit_price, fee=fee))
             active_position = None
 
         return BacktestSessionResult(
