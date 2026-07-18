@@ -11,7 +11,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run V8 backtest with live exchange candles.")
     parser.add_argument("--exchange", choices=["binance", "okx"], default="binance")
     parser.add_argument("--symbol", default="BTCUSDT", help="Binance symbol, e.g. BTCUSDT")
-    parser.add_argument("--okx-symbol", default="BTC-USDT", help="OKX instrument id, e.g. BTC-USDT")
+    parser.add_argument("--okx-symbol", default="BTC-USDT-SWAP", help="OKX perpetual-swap instrument id")
     parser.add_argument("--lookback-days", type=int, default=45)
     parser.add_argument("--micro-lookback-days", type=int, default=45)
     return parser.parse_args()

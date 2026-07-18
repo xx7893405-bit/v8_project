@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", default=".")
     parser.add_argument("--exchange", choices=["binance", "okx"], default="binance")
     parser.add_argument("--symbol", default="BTCUSDT")
-    parser.add_argument("--okx-symbol", default="BTC-USDT")
+    parser.add_argument("--okx-symbol", default="BTC-USDT-SWAP", help="OKX perpetual-swap instrument id")
     parser.add_argument("--lookback-days", type=int, default=45)
     parser.add_argument("--micro-lookback-days", type=int, default=45)
     parser.add_argument("--poll-interval", type=int, default=60)

@@ -18,7 +18,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--exchange", choices=["binance", "okx"], default="binance")
     parser.add_argument("--symbol", default="BTCUSDT", help="Raw public API symbol for Binance")
     parser.add_argument("--ccxt-symbol", default="BTC/USDT:USDT", help="Unified perpetual symbol used for orders")
-    parser.add_argument("--okx-symbol", default="BTC-USDT")
+    parser.add_argument("--okx-symbol", default="BTC-USDT-SWAP", help="OKX perpetual-swap instrument id")
     parser.add_argument("--lookback-days", type=int, default=45)
     parser.add_argument("--micro-lookback-days", type=int, default=45)
     parser.add_argument("--strategy", choices=["nfe", "nfe-v2", "nfe-v4", "v8"], default="nfe-v2")
