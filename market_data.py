@@ -9,6 +9,22 @@ import pandas as pd
 from backtest_config import M1_COLUMNS, TIMEFRAME_FILES
 
 
+def audit_datetime_index(index: pd.Index, frequency: str) -> dict:
+    """Return duplicate and missing open times under the UTC/open-time contract."""
+    normalized = pd.DatetimeIndex(pd.to_datetime(index, utc=True)).tz_localize(None)
+    unique = normalized.drop_duplicates().sort_values()
+    missing = (
+        pd.date_range(unique[0], unique[-1], freq=frequency).difference(unique)
+        if len(unique) > 1
+        else pd.DatetimeIndex([])
+    )
+    return {
+        "rows": len(normalized),
+        "duplicates": int(normalized.duplicated().sum()),
+        "missing": missing,
+    }
+
+
 class MarketDataFeed(Protocol):
     def load_timeframe(self, timeframe: str, columns: Optional[Sequence[str]] = None) -> pd.DataFrame:
         ...
@@ -40,8 +56,8 @@ class CSVMarketDataFeed:
 
     @staticmethod
     def _normalize_datetime_index(df: pd.DataFrame) -> pd.DataFrame:
-        df.index = pd.to_datetime(df.index).tz_localize(None)
-        return df.sort_index()
+        df.index = pd.to_datetime(df.index, utc=True).tz_localize(None)
+        return df[~df.index.duplicated(keep="last")].sort_index()
 
     def load_timeframe(self, timeframe: str, columns: Optional[Sequence[str]] = None) -> pd.DataFrame:
         filename = self.timeframe_files[timeframe]

@@ -19,6 +19,13 @@ API_TIMEFRAME_RULES = {
     "1d": "1d",
 }
 
+EXPECTED_SOURCE_ROWS = {
+    "5m": 5,
+    "1h": 4,
+    "4h": 16,
+    "1d": 96,
+}
+
 BINANCE_INTERVALS = {
     "1m": "1m",
     "15m": "15m",
@@ -34,7 +41,7 @@ OKX_INTERVALS = {
 class ApiFeedConfig:
     exchange: str = "binance"
     symbol: str = "BTCUSDT"
-    okx_symbol: str = "BTC-USDT"
+    okx_symbol: str = "BTC-USDT-SWAP"
     lookback_days: int = 45
     micro_lookback_days: int = 45
     request_timeout: int = 15
@@ -98,6 +105,8 @@ class ExchangeApiMarketDataFeed(MarketDataFeed):
                 "volume": "sum",
             }
         )
+        counts = df["close"].resample(rule, label="left", closed="left").count()
+        resampled = resampled.loc[counts == EXPECTED_SOURCE_ROWS[timeframe]]
         return resampled.dropna(subset=["open", "high", "low", "close"])
 
     def _fetch_remote_ohlcv(self, timeframe: str, lookback_days: int) -> pd.DataFrame:
@@ -109,7 +118,7 @@ class ExchangeApiMarketDataFeed(MarketDataFeed):
         raise ValueError(f"Unsupported exchange: {self.config.exchange}")
 
     def _fetch_binance_ohlcv(self, timeframe: str, lookback_days: int) -> pd.DataFrame:
-        url = "https://api.binance.com/api/v3/klines"
+        url = "https://fapi.binance.com/fapi/v1/klines"
         interval = BINANCE_INTERVALS[timeframe]
         end_time = pd.Timestamp.utcnow().tz_localize(None)
         start_time = end_time - timedelta(days=lookback_days)
@@ -161,6 +170,7 @@ class ExchangeApiMarketDataFeed(MarketDataFeed):
         if df.empty:
             return pd.DataFrame(columns=["open", "high", "low", "close", "volume"])
 
+        df = df[df["close_time"].astype("int64") <= end_time_ms]
         df["datetime"] = pd.to_datetime(df["open_time"], unit="ms")
         df = df.set_index("datetime")
         return self._normalize_ohlcv(df)
@@ -193,7 +203,7 @@ class ExchangeApiMarketDataFeed(MarketDataFeed):
             oldest_seen = None
             for row in rows:
                 ts = pd.to_datetime(int(row[0]), unit="ms")
-                if ts < start_time:
+                if ts < start_time or str(row[8]) != "1":
                     continue
                 filtered_rows.append(row)
                 oldest_seen = row[0]

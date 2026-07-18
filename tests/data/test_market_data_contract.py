@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from market_data import CSVMarketDataFeed
+from market_data import CSVMarketDataFeed, audit_datetime_index
 
 
 class CSVMarketDataFeedContractTest(unittest.TestCase):
@@ -31,6 +31,29 @@ class CSVMarketDataFeedContractTest(unittest.TestCase):
                 [pd.Timestamp("2026-01-01 00:00:00"), pd.Timestamp("2026-01-01 00:15:00")],
             )
             self.assertEqual(result["open"].tolist(), [1.0, 2.0])
+
+    def test_duplicate_open_times_keep_latest_row(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pd.DataFrame(
+                {
+                    "datetime": ["2026-01-01 00:00:00", "2026-01-01 00:00:00"],
+                    "open": [1.0, 2.0],
+                }
+            ).to_csv(Path(directory) / "tiny.csv", index=False)
+
+            result = CSVMarketDataFeed(
+                data_dir=directory, timeframe_files={"15m": "tiny.csv"}
+            ).load_timeframe("15m")
+
+            self.assertEqual(result["open"].tolist(), [2.0])
+
+    def test_index_audit_reports_duplicates_and_gaps(self):
+        audit = audit_datetime_index(
+            pd.Index(["2026-01-01 00:00:00", "2026-01-01 00:00:00", "2026-01-01 00:02:00"]),
+            "1min",
+        )
+        self.assertEqual(audit["duplicates"], 1)
+        self.assertEqual(list(audit["missing"]), [pd.Timestamp("2026-01-01 00:01:00")])
 
     def test_micro_window_is_time_bounded_and_projects_requested_columns(self):
         with tempfile.TemporaryDirectory() as directory:

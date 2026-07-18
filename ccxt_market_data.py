@@ -13,7 +13,7 @@ import duckdb
 import pandas as pd
 
 from backtest_config import M1_COLUMNS
-from market_data import MarketDataFeed
+from market_data import MarketDataFeed, audit_datetime_index
 
 
 OHLCV_COLUMNS = ["open", "high", "low", "close", "volume"]
@@ -287,6 +287,9 @@ class DuckDBMarketDataFeed(MarketDataFeed):
         columns: Sequence[str],
     ) -> pd.DataFrame:
         return self._load_1m().loc[start_time:end_time, list(columns)].copy()
+
+    def audit_1m(self) -> dict:
+        return audit_datetime_index(self._load_1m().index, "1min")
 
 
 class DualMarketDataFeed(MarketDataFeed):
