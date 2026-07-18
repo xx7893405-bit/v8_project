@@ -23,14 +23,16 @@ FULL_START = pd.Timestamp("2021-01-01")
 MTD_START = pd.Timestamp("2026-07-01")
 DEFAULT_DATABASE = Path("data/market_data.duckdb")
 DEFAULT_OUTPUT_ROOT = Path("reports/contract_benchmark")
+RISK_PCT = 0.05
+MAX_LEVERAGE = 20.0
 
 
 def benchmark_config(max_holding_bars: int) -> StrategyConfig:
     return StrategyConfig(
         initial_balance=10_000.0,
-        risk_pct=0.01,
+        risk_pct=RISK_PCT,
         position_sizing_mode="risk_based",
-        leverage=3.0,
+        leverage=MAX_LEVERAGE,
         slippage_usd=15.0,
         limit_order_slippage_usd=5.0,
         stop_loss_slippage_usd=10.0,

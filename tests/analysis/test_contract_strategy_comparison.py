@@ -18,8 +18,8 @@ class ContractStrategyComparisonTest(unittest.TestCase):
     def test_common_execution_config_is_frozen(self):
         config = benchmark_config(96)
         self.assertEqual(config.initial_balance, 10_000.0)
-        self.assertEqual(config.risk_pct, 0.01)
-        self.assertEqual(config.leverage, 3.0)
+        self.assertEqual(config.risk_pct, 0.05)
+        self.assertEqual(config.leverage, 20.0)
         self.assertEqual(config.maker_fee, 0.0002)
         self.assertEqual(config.taker_fee, 0.0005)
         self.assertEqual(config.max_holding_bars, 96)

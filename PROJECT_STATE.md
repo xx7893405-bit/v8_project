@@ -13,7 +13,7 @@ Phase 3：合約資料下載、A 策略相容與三策略比較入口平行準�
 - Rollback：`b6556aa`（`codex/v8-modularization`）；`main`／`v8.0.0` 仍為 `76f6ee4`。
 - Integration：`codex/contract-backtest-parity`，從 `b6556aa` 建立。
 - Benchmark：`codex/contract-v2-a-bears-benchmark`，rollback 為 `3d28f79`。
-- 本輪固定設定：Binance USDT-M `BTCUSDT`；2021-01-01 至最後完整 1m；另跑 2026-07-01 至同截止；10,000 USD、risk-based 1%、3x、maker 0.02%、taker 0.05%、相同滑價與 funding fallback。
+- 本輪固定設定：Binance USDT-M `BTCUSDT`；2021-01-01 至最後完整 1m；另跑 2026-07-01 至同截止；10,000 USD、risk-based 5%、最高 20x、maker 0.02%、taker 0.05%、相同滑價與 funding fallback。
 - 31 項 unittest 通過。
 - Canonical market：Binance USDT 永續 `BTC/USDT:USDT`，NFE V2，15m/1h，isolated，10,000 USD，risk-based 1%，最高 3x。
 - 現行成本 baseline：maker 0.02%、taker 0.05%、entry/limit/stop/liq 滑價沿用既有設定；candidate 必須明列 funding 與 mark/last-price 契約。
