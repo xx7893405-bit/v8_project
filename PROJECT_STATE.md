@@ -6,7 +6,7 @@
 
 ## Current phase
 
-Phase 3：合約資料下載、A 策略相容與三策略比較入口平行準備。
+Phase 3 完成：永續合約資料、A 策略、比較入口與兩期間正式回測均已驗證。
 
 ## Verified baseline
 
@@ -14,6 +14,11 @@ Phase 3：合約資料下載、A 策略相容與三策略比較入口平行準�
 - Integration：`codex/contract-backtest-parity`，從 `b6556aa` 建立。
 - Benchmark：`codex/contract-v2-a-bears-benchmark`，rollback 為 `3d28f79`。
 - 本輪固定設定：Binance USDT-M `BTCUSDT`；2021-01-01 至最後完整 1m；另跑 2026-07-01 至同截止；10,000 USD、risk-based 5%、最高 20x、maker 0.02%、taker 0.05%、相同滑價與 funding fallback。
+- 新合約資料：`data/btcusdt_perp_1m_202101_present.duckdb`，2,915,392 rows，2021-01-01 00:00～2026-07-18 13:51 UTC，duplicates=0、gaps=0、SHA-256 `5b8e0da5a65338b5ca14ca6ee919331f82db4df4148edde44b4e046f433a5965`。
+- 正式報告：`reports/contract_benchmark/20260718_btcusdt_perp_risk5_lev20_ea28b7ca3c90c46b/`；snapshot fingerprint `ea28b7ca3c90c46b`。
+- 全期結果：V2 +210.2279% / MDD -36.5458% / 89 trades / win 40.4494% / PF 1.8409；A -69.9109% / -74.6945% / 282 / 37.5887% / 0.7642；BearS -93.2480% / -96.3746% / 216 / 17.1296% / 0.5058。
+- 2026-07 MTD：V2 +3.9231%（1 trade）；A -5.1183%（1 trade）；BearS -10.2648%（2 trades）。
+- 65 項 unittest、py_compile、diff-check、snapshot identity 與 trade-ledger/final-balance 一致性通過。
 - 31 項 unittest 通過。
 - Canonical market：Binance USDT 永續 `BTC/USDT:USDT`，NFE V2，15m/1h，isolated，10,000 USD，risk-based 1%，最高 3x。
 - 現行成本 baseline：maker 0.02%、taker 0.05%、entry/limit/stop/liq 滑價沿用既有設定；candidate 必須明列 funding 與 mark/last-price 契約。
@@ -43,7 +48,8 @@ Phase 3：合約資料下載、A 策略相容與三策略比較入口平行準�
 - 合約資料缺口為 2024-10-02 10:29～2026-05-25 23:59，共 864,811 分鐘；資料也停在 2026-07-10，不能作 2026-07-18 live 判斷。
 - Live 已做到 closed-bar 增量、fill 後保護與冪等 reconcile，但交易所實際 fills 尚未回寫策略帳本，策略轉 flat 也不會自動平掉不一致的交易所倉位。
 - 歷史逐期 funding 與 mark-price 清算資料尚未接入；目前只有明確方向的固定 funding fallback。
+- 本輪 MDD 由已平倉交易 equity 計算，未包含持倉中的 mark-to-market 路徑；歷史 funding 未下載，使用固定 0.01%/8h fallback。
 
 ## Next checkpoint
 
-Data 完成 rows/gaps/duplicates/fingerprint 驗收，Strategy 完成 A 相容測試，Analysis 完成公平指標入口後，由 Manager 整合並跑全期與 2026-07 月迄今；原始資料與報告使用新路徑，不覆蓋現貨資料或舊報表。
+等待使用者審視 V2/A/BearS 結果。若要提高合約實盤逼真度，下一步是歷史 funding、mark-price 與持倉中 equity curve；未經確認不合併 `main`、不 push。
