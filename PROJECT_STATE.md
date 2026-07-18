@@ -2,33 +2,36 @@
 
 ## Objective
 
-將 V8 專案分成回測核心、資料、策略、分析與入口串接區塊，由無狀態 `v8-manager` 分階段協調多 Agent 修改與整合。
+升級合約策略回測系統，使 closed-candle 訊號、撮合事件、成本帳務與 paper/live 執行可重現且一致，並保留舊版回復點。
 
 ## Current phase
 
-Phase 1：共用契約準備。
+Phase 1：合約與時間契約已凍結；Engine、Data、Strategy/Live 分區實作。
 
 ## Verified baseline
 
-- `main` 與 `v8.0.0` 指向 `76f6ee4`。
-- `codex/v8-modularization` 已包含最小測試分類與 Manager workflow。
-- 31 項測試通過。
-- V1→V4 快速回歸通過；資料指紋 `adcc5df0ab1e82ee`。
-- 拋棄式研究入口與輸出暫存於 `/private/tmp/v8_project_disposable_20260717`。
+- Rollback：`b6556aa`（`codex/v8-modularization`）；`main`／`v8.0.0` 仍為 `76f6ee4`。
+- Integration：`codex/contract-backtest-parity`，從 `b6556aa` 建立。
+- 31 項 unittest 通過。
+- Canonical market：Binance USDT 永續 `BTC/USDT:USDT`，NFE V2，15m/1h，isolated，10,000 USD，risk-based 1%，最高 3x。
+- 現行成本 baseline：maker 0.02%、taker 0.05%、entry/limit/stop/liq 滑價沿用既有設定；candidate 必須明列 funding 與 mark/last-price 契約。
+- 合約 DuckDB 快照：2024-07-01 00:00 至 2026-07-10 01:10，共 199,420 根 1m；資料密度不足，完成缺口稽核前不得宣稱為完整兩年回測。
+- 對照指標：總報酬、最大回撤、交易數、勝率、profit factor；所有差異需可追溯至時間／成交／成本修正。
 
 ## Active branches and worktrees
 
-- Manager/integration: `codex/v8-modularization`
-- Engine: `codex/v8-engine-core`
-- Data: `codex/v8-data-pipeline`
-- Strategies: `codex/v8-strategy-modules`
-- Existing: `codex/ai-signal-webhook`, `codex/param-opt`, `codex/strategy-admin-controls`
+- Manager/integration：`codex/contract-backtest-parity`
+- Engine：`codex/v8-engine-core`
+- Data：`codex/v8-data-pipeline`
+- Strategy/Live：`codex/v8-strategy-modules`
+- 保留中的其他工作：`codex/nfe-v2-a-bears-comparison`、`codex/nfe-v2-a-strategy`、`codex/nfe-v2-a-analysis`、`codex/param-opt`。
 
 ## Known conflicts
 
-- `codex/param-opt` 有未提交的 `strategy_engine.py` 修改。
-- `codex/strategy-admin-controls` 與資料工作可能同時涉及 `api_market_data.py`。
+- NFE V2 A／BearS worktree 有進行中未提交修改，本輪禁止觸碰。
+- `codex/param-opt` 有未提交的 `strategy_engine.py` 與研究腳本，本輪不採用、不覆蓋。
+- 合約 1m 資料存在大量缺口；Data 任務需先產出完整性契約與可用窗口。
 
 ## Next checkpoint
 
-凍結 engine／strategy 與 data feed 契約；共用契約完成前，不允許 strategy 與 engine worker 同時修改核心介面。
+三個 worker 各自提交互斥 ownership 變更後，Manager 依 Data → Engine → Strategy/Live 整合，執行完整測試、prefix invariance、closed-candle parity 與固定快照 baseline/candidate 對照。

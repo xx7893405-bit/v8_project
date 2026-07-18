@@ -47,3 +47,19 @@ Status: Accepted
 Decision: 任務跨兩個以上獨立區塊時，Manager 自動分派最多三個平行 worker；單一區塊或高耦合工作直接處理或序列執行。
 
 Consequence: 使用者不必維持永久主管 thread，但 Manager 必須維持互斥 ownership 與階段依賴。
+
+## ADR-007: Contract market is the canonical execution market
+
+Status: Accepted
+
+Decision: 正式回測、paper 與 live 以同一永續合約商品與契約規格為準；現貨資料只能作明確標示的 signal feed，必須透過 dual-market 契約處理基差，不得直接代替合約成交價。
+
+Consequence: 手續費、funding、mark/last-price、contract size、槓桿、維持保證金與清算皆依合約市場建模。
+
+## ADR-008: Closed-candle and conservative intrabar semantics
+
+Status: Accepted
+
+Decision: 只有完整收盤 K 線可產生確認訊號；訊號最早於收盤後執行。同棒事件若無更細資料證明路徑，採不高估績效的保守結果。
+
+Consequence: 任意時間截斷資料的歷史 prefix 必須不變；未收 K、未確認 fill 與模糊 intrabar 路徑不得生成樂觀交易。
