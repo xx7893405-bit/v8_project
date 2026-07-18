@@ -216,7 +216,12 @@ def main() -> None:
     args = parser.parse_args()
     inserted = download_history(args.database, args.start, args.end)
     audit = audit_database(args.database)
-    audit_path = Path(args.audit) if args.audit else Path(args.database).with_suffix(".audit.json")
+    database_path = Path(args.database)
+    audit_path = (
+        Path(args.audit)
+        if args.audit
+        else database_path.with_name(f"{database_path.stem}_diagnostic.json")
+    )
     audit_path.write_text(json.dumps(audit, indent=2) + "\n", encoding="utf-8")
     print(f"inserted={inserted:,}")
     print(json.dumps(audit, indent=2))
