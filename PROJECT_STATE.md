@@ -2,23 +2,25 @@
 
 ## Objective
 
-下載 2021-01-01 至今的 Binance BTCUSDT 永續合約資料，並以已升級回測引擎公平比較 NFE V2、NFE V2 A 與 BearS 的全期及 2026-07 月迄今結果。
+以單變因候選改善 NFE V2 A 與 BearS 的進場品質，並在相同合約 snapshot、成本、5% risk 與 20x 上限下公平比較。
 
 ## Current phase
 
-Phase 4 完成：新版回測系統、標準永續合約資料路徑、可追溯 manifest 與跨機器重建流程已提交至 benchmark 分支。
+Phase 6 進行中：V2A 停損／延遲重驗證與 BearS Fib／Triple 候選分階段實作。
 
 ## Verified baseline
 
 - Rollback：`b6556aa`（`codex/v8-modularization`）；`main`／`v8.0.0` 仍為 `76f6ee4`。
 - Integration：`codex/contract-backtest-parity`，從 `b6556aa` 建立。
 - Benchmark：`codex/contract-v2-a-bears-benchmark`，rollback 為 `3d28f79`。
+- Entry quality：`codex/v2a-bears-entry-quality`，rollback 為 `405049c`；POC 實驗不納入。
 - 本輪固定設定：Binance USDT-M `BTCUSDT`；2021-01-01 至最後完整 1m；另跑 2026-07-01 至同截止；10,000 USD、risk-based 5%、最高 20x、maker 0.02%、taker 0.05%、相同滑價與 funding fallback。
 - 新合約資料：`data/btcusdt_perp_1m_202101_present.duckdb`，2,915,392 rows，2021-01-01 00:00～2026-07-18 13:51 UTC，duplicates=0、gaps=0、SHA-256 `5b8e0da5a65338b5ca14ca6ee919331f82db4df4148edde44b4e046f433a5965`。
 - 標準比較入口預設讀取上述 DuckDB；Git 保存 `data/btcusdt_perp_1m_202101_present.manifest.json` 與 `docs/CONTRACT_BACKTEST_DATA.md`，資料庫本體維持 ignored。
 - 正式報告：`reports/contract_benchmark/20260718_btcusdt_perp_risk5_lev20_ea28b7ca3c90c46b/`；snapshot fingerprint `ea28b7ca3c90c46b`。
 - 全期結果：V2 +210.2279% / MDD -36.5458% / 89 trades / win 40.4494% / PF 1.8409；A -69.9109% / -74.6945% / 282 / 37.5887% / 0.7642；BearS -93.2480% / -96.3746% / 216 / 17.1296% / 0.5058。
 - 2026-07 MTD：V2 +3.9231%（1 trade）；A -5.1183%（1 trade）；BearS -10.2648%（2 trades）。
+- 進場品質診斷：V2A stop<0.10% 共 97 trades、win 8.25%、PF 0.006；BearS Fib 0.5／0.618／0.786 的 PF 分別 0.855／0.345／0.208，Triple PF 0.728、Double 0.368。
 - 65 項 unittest、py_compile、diff-check、snapshot identity 與 trade-ledger/final-balance 一致性通過。
 - 31 項 unittest 通過。
 - Canonical market：Binance USDT 永續 `BTC/USDT:USDT`，NFE V2，15m/1h，isolated，10,000 USD，risk-based 1%，最高 3x。
@@ -52,4 +54,4 @@ Phase 4 完成：新版回測系統、標準永續合約資料路徑、可追溯
 
 ## Next checkpoint
 
-等待使用者決定是否合併 `main`、push，或把 DuckDB 發布至 artifact storage。若要提高合約實盤逼真度，下一步是歷史 funding、mark-price 與持倉中 equity curve。
+完成單變因候選與時間安全測試後，跑七組全期及 2026-07 MTD；只有 PF≥1、MDD 改善、樣本≥50 且無單筆獲利集中才接受。

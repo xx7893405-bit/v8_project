@@ -16,6 +16,11 @@
 | ANL-001 | done | Analysis / `codex/contract-benchmark-analysis` | MGR-001 | comparison runner、analysis tests、獨立 reports | `0536133` + `e42e9cc`；risk 5%、20x；兩期間與必要指標 |
 | BENCH-001 | done | Manager / `codex/contract-v2-a-bears-benchmark` | DATA-003, STR-002, ANL-001 | 整合、完整測試、正式回測與 handoff | 65 tests；snapshot `ea28b7ca3c90c46b`；報告完成；未 push |
 | MGR-002 | done | Manager / `codex/contract-v2-a-bears-benchmark` | BENCH-001 | 標準資料路徑、manifest、使用文件與 Git 版本化 | DuckDB 保持 ignored；預設入口及跨機器重建流程已驗證 |
+| MGR-004 | in_progress | Manager / `codex/v2a-bears-entry-quality` | MGR-002 | 單變因契約、ownership、整合與狀態 | rollback `405049c`；不帶入 POC；固定 snapshot／成本／風險 |
+| STR-004 | in_progress | V2A Agent / isolated worktree | MGR-004 | `nfe_v2_a_strategy.py` 與專屬 tests | 預設不變；0.10% stop gate 與 delay TP1 invalidation 可獨立啟用 |
+| STR-005 | in_progress | BearS Agent / isolated worktree | MGR-004 | `bears_strategy.py` 與專屬 tests | 預設不變；Fib 0.5、Triple 可獨立啟用與計數 |
+| ANL-003 | in_progress | Analysis Agent / isolated worktree | MGR-004 | entry-quality runner、analysis tests、獨立 reports | 七組、兩期間；return/MDD/trades/win/PF/R/快停/集中度 |
+| BENCH-003 | ready | Manager / `codex/v2a-bears-entry-quality` | STR-004, STR-005, ANL-003 | 整合、完整測試、正式回測與判定 | baseline 重現；候選按 PF/MDD/sample/concentration 驗收 |
 
 ## Current blockers
 
