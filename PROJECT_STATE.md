@@ -2,11 +2,11 @@
 
 ## Objective
 
-以單變因候選改善 NFE V2 A 與 BearS 的進場品質，並在相同合約 snapshot、成本、5% risk 與 20x 上限下公平比較。
+以共同 1m 時間索引與相同執行假設，比較 Binance BTCUSDT 現貨／永續資料對 V2、V2A、BearS 回測期望的影響。
 
 ## Current phase
 
-Phase 6 完成：V2A 停損／延遲重驗證與 BearS Fib／Triple 單變因候選、回歸測試及正式比較均已驗證。
+Phase 7 進行中：Spot／Perp 成對資料契約、六組比較與交易重疊診斷分階段實作。
 
 ## Verified baseline
 
@@ -14,8 +14,10 @@ Phase 6 完成：V2A 停損／延遲重驗證與 BearS Fib／Triple 單變因候
 - Integration：`codex/contract-backtest-parity`，從 `b6556aa` 建立。
 - Benchmark：`codex/contract-v2-a-bears-benchmark`，rollback 為 `3d28f79`。
 - Entry quality：`codex/v2a-bears-entry-quality`，rollback 為 `405049c`；POC 實驗不納入。
+- Spot vs Perp：`codex/spot-vs-perp-2021-2026`，rollback 為 `5000021`；策略使用原始 defaults。
 - 本輪固定設定：Binance USDT-M `BTCUSDT`；2021-01-01 至最後完整 1m；另跑 2026-07-01 至同截止；10,000 USD、risk-based 5%、最高 20x、maker 0.02%、taker 0.05%、相同滑價與 funding fallback。
 - 新合約資料：`data/btcusdt_perp_1m_202101_present.duckdb`，2,915,392 rows，2021-01-01 00:00～2026-07-18 13:51 UTC，duplicates=0、gaps=0、SHA-256 `5b8e0da5a65338b5ca14ca6ee919331f82db4df4148edde44b4e046f433a5965`。
+- 本地現貨資料：`202101-202607_merged/btc_1m.csv`，2,896,605 rows，2021-01-01 00:00～2026-07-06 06:37 UTC，duplicates=0、missing=1,073、SHA-256 `7c9b2fe46d1fec7c4339ad7fd4350f769151ebbc749d487af643d202bade7c7e`。
 - 標準比較入口預設讀取上述 DuckDB；Git 保存 `data/btcusdt_perp_1m_202101_present.manifest.json` 與 `docs/CONTRACT_BACKTEST_DATA.md`，資料庫本體維持 ignored。
 - 正式報告：`reports/contract_benchmark/20260718_btcusdt_perp_risk5_lev20_ea28b7ca3c90c46b/`；snapshot fingerprint `ea28b7ca3c90c46b`。
 - 全期結果：V2 +210.2279% / MDD -36.5458% / 89 trades / win 40.4494% / PF 1.8409；A -69.9109% / -74.6945% / 282 / 37.5887% / 0.7642；BearS -93.2480% / -96.3746% / 216 / 17.1296% / 0.5058。
@@ -58,4 +60,4 @@ Phase 6 完成：V2A 停損／延遲重驗證與 BearS Fib／Triple 單變因候
 
 ## Next checkpoint
 
-等待使用者審視結果。若繼續，下一個最小候選為 BearS Triple LONG-only，並需 walk-forward／out-of-sample；未經確認不改預設策略、不參數網格、不合併 `main`、不 push。
+先以兩市場共同 1m timestamps 與共同截止，從 1m 重建完整高週期 bars，再跑 V2／V2A／BearS 六組；相同 5% risk、20x、fee、slippage、funding 只隔離價格資料影響。

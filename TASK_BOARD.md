@@ -21,6 +21,10 @@
 | STR-005 | done | BearS Agent / `codex/entry-bears` | MGR-004 | `bears_strategy.py` 與專屬 tests | `a540964`；預設不變；Fib／Triple filters 與 counters |
 | ANL-003 | done | Analysis Agent / `codex/entry-analysis` | MGR-004 | entry-quality runner、analysis tests、獨立 reports | `fbcef28` + `da23051`；七組、兩期間、grouped quality metrics |
 | BENCH-003 | done | Manager / `codex/v2a-bears-entry-quality` | STR-004, STR-005, ANL-003 | 整合、完整測試、正式回測與判定 | 75 tests；Triple-only 通過初階數值門檻，其餘淘汰／診斷 |
+| MGR-005 | in_progress | Manager / `codex/spot-vs-perp-2021-2026` | BENCH-003 | paired-market 契約、ownership、整合與狀態 | rollback `5000021`；策略 defaults；共同 timestamps／成本／風險 |
+| DATA-004 | in_progress | Data Agent / isolated worktree | MGR-005 | paired 1m loader、共同索引、完整 resample、audit tests | Spot/Perp 同 timestamps；不完整高週期 bars 兩邊同時排除 |
+| ANL-004 | in_progress | Analysis Agent / isolated worktree | MGR-005, DATA-004 | 六組 runner、basis／trade-overlap／grouped reports | V2/V2A/BearS × Spot/Perp；相同設定與共同截止 |
+| BENCH-004 | ready | Manager / `codex/spot-vs-perp-2021-2026` | DATA-004, ANL-004 | 整合、完整測試、正式回測與因果判讀 | baseline、snapshot、ledger、market-pair differences 可重現 |
 
 ## Current blockers
 
