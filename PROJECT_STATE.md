@@ -6,7 +6,7 @@
 
 ## Current phase
 
-Phase 7 進行中：Spot／Perp 成對資料契約、六組比較與交易重疊診斷分階段實作。
+Phase 7 完成：Spot／Perp 成對資料契約、六組比較、ledger 與交易重疊診斷已驗證。
 
 ## Verified baseline
 
@@ -15,6 +15,11 @@ Phase 7 進行中：Spot／Perp 成對資料契約、六組比較與交易重疊
 - Benchmark：`codex/contract-v2-a-bears-benchmark`，rollback 為 `3d28f79`。
 - Entry quality：`codex/v2a-bears-entry-quality`，rollback 為 `405049c`；POC 實驗不納入。
 - Spot vs Perp：`codex/spot-vs-perp-2021-2026`，rollback 為 `5000021`；策略使用原始 defaults。
+- Spot vs Perp 整合 commits：`59c08dc`（paired feed）、`5316c44`（comparison runner）；78 tests、py_compile、diff-check 通過。
+- 共同 snapshot：2,896,605 rows，2021-01-01 00:00～2026-07-06 06:37 UTC，fingerprint `d67917d4724ab20d`；Spot／Perp 各週期索引完全相同。
+- Spot proxy／Perp：V2 +133.5406%／+198.5200%（PF 1.4553／1.7941）；V2A -32.6988%／-67.6774%（PF 0.9149／0.7729）；BearS -62.2611%／-92.0797%（PF 0.8670／0.5214）。
+- 因果判讀：價格來源影響訊號與虧損幅度，但 V2A／BearS 在兩市場皆負期望，不能把低期望主要歸因於現貨／合約資料差異。
+- 正式報告：`reports/spot_perp_benchmark/20260718_btcusdt_spot_vs_perp_risk5_lev20_d67917d4724ab20d/`；完整判讀見 `docs/SPOT_VS_PERP_2021_2026_RESULTS.md`。
 - 本輪固定設定：Binance USDT-M `BTCUSDT`；2021-01-01 至最後完整 1m；另跑 2026-07-01 至同截止；10,000 USD、risk-based 5%、最高 20x、maker 0.02%、taker 0.05%、相同滑價與 funding fallback。
 - 新合約資料：`data/btcusdt_perp_1m_202101_present.duckdb`，2,915,392 rows，2021-01-01 00:00～2026-07-18 13:51 UTC，duplicates=0、gaps=0、SHA-256 `5b8e0da5a65338b5ca14ca6ee919331f82db4df4148edde44b4e046f433a5965`。
 - 本地現貨資料：`202101-202607_merged/btc_1m.csv`，2,896,605 rows，2021-01-01 00:00～2026-07-06 06:37 UTC，duplicates=0、missing=1,073、SHA-256 `7c9b2fe46d1fec7c4339ad7fd4350f769151ebbc749d487af643d202bade7c7e`。
@@ -60,4 +65,4 @@ Phase 7 進行中：Spot／Perp 成對資料契約、六組比較與交易重疊
 
 ## Next checkpoint
 
-先以兩市場共同 1m timestamps 與共同截止，從 1m 重建完整高週期 bars，再跑 V2／V2A／BearS 六組；相同 5% risk、20x、fee、slippage、funding 只隔離價格資料影響。
+使用者審視 Spot／Perp 因果結果後，再決定是否針對 V2A／BearS 進行新一輪單變因策略研究；本輪不改策略 defaults。
