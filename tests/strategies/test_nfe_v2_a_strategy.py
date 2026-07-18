@@ -104,10 +104,89 @@ class NFEV2AStrategyTest(unittest.TestCase):
     def test_defaults_and_current_strategy_contract_are_preserved(self):
         self.assertEqual(self.strategy.signal_timeframe(), "5m")
         self.assertEqual(self.strategy.entry_delay, pd.Timedelta("90m"))
+        self.assertEqual(self.strategy.min_stop_pct, 0.0)
+        self.assertFalse(self.strategy.invalidate_target_during_delay)
+        self.assertEqual(self.strategy.stop_too_tight_count, 0)
+        self.assertEqual(self.strategy.delay_target_invalidated_count, 0)
         self.create_delayed_setup()
         decision = self.scan(self.signal_time + pd.Timedelta("95m"))
         self.assertIsNone(decision.retrace_order["live_tp2"])
         self.assertTrue(callable(self.strategy.after_manage_position))
+
+    def test_stop_gate_rejects_tight_long_and_accepts_threshold_boundary(self):
+        strategy = NFEV2AStrategy(min_stop_pct=0.001)
+        self.order.update(sl=99.91)
+
+        decision = self.create_delayed_setup(strategy)
+
+        self.assertEqual(decision.missed[0]["reason"], "A_STOP_TOO_TIGHT")
+        self.assertEqual(strategy.stop_too_tight_count, 1)
+        self.assertIsNone(strategy._delayed_setup)
+
+        self.order.update(sl=99.9)
+        decision = self.create_delayed_setup(strategy)
+        self.assertEqual(decision.missed, [])
+        self.assertIsNotNone(strategy._delayed_setup)
+
+    def test_stop_gate_rejects_tight_short_and_accepts_threshold_boundary(self):
+        strategy = NFEV2AStrategy(min_stop_pct=0.001)
+        self.order.update(type="SHORT", sl=100.09)
+
+        decision = self.create_delayed_setup(strategy)
+
+        self.assertEqual(decision.missed[0]["reason"], "A_STOP_TOO_TIGHT")
+        self.assertEqual(strategy.stop_too_tight_count, 1)
+
+        self.order.update(sl=100.1)
+        decision = self.create_delayed_setup(strategy)
+        self.assertEqual(decision.missed, [])
+        self.assertIsNotNone(strategy._delayed_setup)
+
+    def test_target_revalidation_cancels_long_and_short_setups(self):
+        for trade_type, bar in (
+            ("LONG", pd.Series({"high": 120.0, "low": 95.0})),
+            ("SHORT", pd.Series({"high": 105.0, "low": 80.0})),
+        ):
+            with self.subTest(trade_type=trade_type):
+                strategy = NFEV2AStrategy(invalidate_target_during_delay=True)
+                self.order.update(
+                    type=trade_type,
+                    sl=90.0 if trade_type == "LONG" else 110.0,
+                    tp1=120.0 if trade_type == "LONG" else 80.0,
+                )
+                self.create_delayed_setup(strategy)
+
+                decision = self.scan(self.signal_time + pd.Timedelta("30m"), bar, strategy)
+
+                self.assertEqual(decision.missed[0]["reason"], "A_DELAY_TARGET_PASSED")
+                self.assertEqual(strategy.delay_target_invalidated_count, 1)
+                self.assertIsNone(strategy._delayed_setup)
+
+    def test_stop_invalidation_has_priority_when_stop_and_target_touch_same_bar(self):
+        strategy = NFEV2AStrategy(invalidate_target_during_delay=True)
+        self.order["tp1"] = 110.0
+        self.create_delayed_setup(strategy)
+
+        decision = self.scan(
+            self.signal_time + pd.Timedelta("30m"),
+            pd.Series({"high": 110.0, "low": 89.0}),
+            strategy,
+        )
+
+        self.assertEqual(decision.missed[0]["reason"], "A_DELAY_STOP_INVALIDATED")
+        self.assertEqual(strategy.delay_target_invalidated_count, 0)
+
+    def test_target_revalidation_is_independent_and_preserves_release_timing(self):
+        strategy = NFEV2AStrategy(invalidate_target_during_delay=True)
+        self.order["tp1"] = 120.0
+        self.create_delayed_setup(strategy)
+
+        self.assertIsNone(
+            self.scan(self.signal_time + pd.Timedelta("94m"), strategy=strategy).retrace_order
+        )
+        decision = self.scan(self.signal_time + pd.Timedelta("95m"), strategy=strategy)
+
+        self.assertEqual(decision.retrace_order["signal_time"], self.signal_time)
 
 
 if __name__ == "__main__":
