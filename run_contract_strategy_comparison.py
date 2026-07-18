@@ -21,7 +21,7 @@ from nfe_v2_strategy import NFEV2Strategy
 MARKET = {"exchange": "binance", "market_type": "swap", "symbol": "BTC/USDT:USDT"}
 FULL_START = pd.Timestamp("2021-01-01")
 MTD_START = pd.Timestamp("2026-07-01")
-DEFAULT_DATABASE = Path("data/market_data.duckdb")
+DEFAULT_DATABASE = Path("data/btcusdt_perp_1m_202101_present.duckdb")
 DEFAULT_OUTPUT_ROOT = Path("reports/contract_benchmark")
 RISK_PCT = 0.05
 MAX_LEVERAGE = 20.0

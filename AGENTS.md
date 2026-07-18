@@ -45,6 +45,15 @@
 
 ## 策略優化與對照回測
 
+### 合約策略標準資料
+
+- 合約策略評估一律優先使用 `data/btcusdt_perp_1m_202101_present.duckdb`；不得以現貨資料或有已知缺口的舊 `data/market_data.duckdb` 代替。
+- 執行前核對 `data/btcusdt_perp_1m_202101_present.manifest.json` 與本機 diagnostic，確認市場為 Binance USDT-M `BTC/USDT:USDT`、`market_type=swap`、只含已收盤 1m K 線，且無重複與缺口。
+- 資料更新使用 `python download_perpetual_history.py`；更新後必須重新稽核並記錄截止時間、筆數、SHA-256 與回測報告的 snapshot fingerprint，不得覆蓋舊報告。
+- V2、A、BearS 的正式公平比較使用 `python run_contract_strategy_comparison.py`；預設為 risk-based `risk_pct=5%`、槓桿上限 `20x`。若改動設定，報告須明列差異，不得與標準結果混稱。
+- DuckDB 本體維持 Git ignored。跨機器若需重現同一快照，從 artifact/object storage 取得後以 manifest SHA-256 驗證；若只需最新評估，可在目標機器用下載器重建。
+- 完整操作與目前限制見 `docs/CONTRACT_BACKTEST_DATA.md`；歷史 funding、mark-price 與持倉中 equity 尚未整合時，必須在結論中揭露。
+
 凡是修改進出場、過濾條件、停損停利、倉位、槓桿、參數或其他會影響交易結果的邏輯，都必須和修改前版本進行對照回測：
 
 - 保留修改前版本作為 baseline，不以新結果覆蓋舊報表。

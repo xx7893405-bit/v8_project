@@ -1,0 +1,18 @@
+{
+  "dataset": "binance_btcusdt_usdtm_perpetual_1m",
+  "exchange": "binance",
+  "market_type": "swap",
+  "symbol": "BTC/USDT:USDT",
+  "interval": "1m",
+  "closed_candles_only": true,
+  "row_count": 2915392,
+  "first_open_utc": "2021-01-01 00:00:00",
+  "last_open_utc": "2026-07-18 13:51:00",
+  "duplicates": 0,
+  "gap_count": 0,
+  "missing_minutes": 0,
+  "sha256": "5b8e0da5a65338b5ca14ca6ee919331f82db4df4148edde44b4e046f433a5965",
+  "local_path": "data/btcusdt_perp_1m_202101_present.duckdb",
+  "snapshot_recorded_on": "2026-07-18",
+  "generator": "python download_perpetual_history.py"
+}

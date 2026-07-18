@@ -6,6 +6,7 @@ import duckdb
 import pandas as pd
 
 from run_contract_strategy_comparison import (
+    DEFAULT_DATABASE,
     assert_same_snapshot,
     benchmark_config,
     calculate_metrics,
@@ -15,6 +16,9 @@ from run_contract_strategy_comparison import (
 
 
 class ContractStrategyComparisonTest(unittest.TestCase):
+    def test_default_database_is_canonical_perpetual_snapshot(self):
+        self.assertEqual(DEFAULT_DATABASE, Path("data/btcusdt_perp_1m_202101_present.duckdb"))
+
     def test_common_execution_config_is_frozen(self):
         config = benchmark_config(96)
         self.assertEqual(config.initial_balance, 10_000.0)

@@ -15,10 +15,11 @@
 | STR-002 | done | Strategy / `codex/contract-benchmark-strategy` | LIVE-001 | `nfe_v2_a_strategy.py`、A tests | `474a2bf`；A 6 tests；5m close 後延遲 90m |
 | ANL-001 | done | Analysis / `codex/contract-benchmark-analysis` | MGR-001 | comparison runner、analysis tests、獨立 reports | `0536133` + `e42e9cc`；risk 5%、20x；兩期間與必要指標 |
 | BENCH-001 | done | Manager / `codex/contract-v2-a-bears-benchmark` | DATA-003, STR-002, ANL-001 | 整合、完整測試、正式回測與 handoff | 65 tests；snapshot `ea28b7ca3c90c46b`；報告完成；未 push |
+| MGR-002 | done | Manager / `codex/contract-v2-a-bears-benchmark` | BENCH-001 | 標準資料路徑、manifest、使用文件與 Git 版本化 | DuckDB 保持 ignored；預設入口及跨機器重建流程已驗證 |
 
 ## Current blockers
 
-- 合約資料有 864,811 分鐘缺口且已過期，績效結果只可視為診斷。
+- 舊 `data/market_data.duckdb` 有 864,811 分鐘缺口且已停用；正式評估須使用新的標準合約資料路徑。
 - 實際帳戶 fee tier、歷史 funding 與 mark-price dataset 尚未提供；不偽造精準成本。
 - Live fill ledger 與 flat-position convergence 尚未完成，禁止直接宣稱 production-ready。
 - NFE V2 A／BearS 與 `param-opt` 的未提交 worktree 全數保留且禁止修改。
