@@ -11,6 +11,7 @@ from run_entry_quality_comparison import (
     FILTER_COUNTERS,
     calculate_entry_quality_metrics,
     filter_counts,
+    grouped_entry_quality_metrics,
     strategy_specs,
     write_reports,
 )
@@ -134,6 +135,46 @@ class EntryQualityComparisonTest(unittest.TestCase):
         self.assertEqual(counts["delay_target_invalidated_count"], 0)
         self.assertEqual(counts["triple_filtered_setups"], 0)
         json.dumps(counts, allow_nan=False)
+
+    def test_grouped_metrics_have_year_and_side_labels(self):
+        trades = [
+            {
+                "type": "LONG",
+                "entry_time": "2025-12-31 23:00:00",
+                "exit_time": "2026-01-01 00:00:00",
+                "entry_balance": 10_000.0,
+                "pnl": 100.0,
+                "rr_realized": 2.0,
+            },
+            {
+                "type": "SHORT",
+                "entry_time": "2026-02-01 00:00:00",
+                "exit_time": "2026-02-01 02:00:00",
+                "entry_balance": 10_100.0,
+                "pnl": -50.0,
+                "rr_realized": -1.0,
+            },
+            {
+                "type": "LONG",
+                "entry_time": "2027-01-01 00:00:00",
+                "exit_time": "2027-01-01 00:30:00",
+                "entry_balance": 10_050.0,
+                "pnl": 25.0,
+                "rr_realized": 0.5,
+            },
+        ]
+        by_year = grouped_entry_quality_metrics(trades, "year", "1h")
+        self.assertEqual([row["year"] for row in by_year], [2026, 2027])
+        self.assertEqual(by_year[0]["trades"], 2)
+        self.assertEqual(by_year[0]["profit_factor"], 2.0)
+        self.assertEqual(by_year[0]["quick_exit_count"], 1)
+
+        by_side = grouped_entry_quality_metrics(trades, "type", "1h")
+        self.assertEqual([row["type"] for row in by_side], ["LONG", "SHORT"])
+        self.assertEqual(by_side[0]["trades"], 2)
+        self.assertEqual(by_side[0]["top_win_share_pct"], 80.0)
+        self.assertEqual(by_side[1]["trades"], 1)
+        self.assertEqual(grouped_entry_quality_metrics([], "year", "1h"), [])
 
     def test_report_formats_and_existing_output_is_not_overwritten(self):
         metrics = calculate_entry_quality_metrics(

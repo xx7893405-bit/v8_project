@@ -157,6 +157,33 @@ def filter_counts(strategy: object) -> dict[str, int]:
     return {name: int(getattr(strategy, name, 0)) for name in FILTER_COUNTERS}
 
 
+def grouped_entry_quality_metrics(
+    trades: list[dict], column: str, signal_timeframe: str
+) -> list[dict[str, Any]]:
+    if not trades:
+        return []
+    frame = pd.DataFrame(trades).copy()
+    if column == "year":
+        frame[column] = pd.to_datetime(frame["exit_time"]).dt.year
+    rows = []
+    for value, group in frame.groupby(column, sort=True):
+        ordered = group.sort_values("exit_time")
+        initial_balance = float(ordered.iloc[0]["entry_balance"])
+        label = int(value) if column == "year" else str(value)
+        rows.append(
+            {
+                column: label,
+                **calculate_entry_quality_metrics(
+                    ordered.to_dict("records"),
+                    missed=0,
+                    initial_balance=initial_balance,
+                    signal_timeframe=signal_timeframe,
+                ),
+            }
+        )
+    return rows
+
+
 def _strategy_parameters(strategy: object) -> dict[str, Any]:
     result = {}
     for key, value in vars(strategy).items():
@@ -206,6 +233,8 @@ def run_period(
         "backtest_config": asdict(cfg),
         "runtime_seconds": round(monotonic() - started, 2),
         "metrics": {**metrics, **filter_counts(strategy)},
+        "by_year": grouped_entry_quality_metrics(session.trades, "year", signal_timeframe),
+        "by_side": grouped_entry_quality_metrics(session.trades, "type", signal_timeframe),
         "trades_file": trade_file.name,
     }
 
