@@ -967,6 +967,7 @@ class MultiTimeframeBacktester:
 
         o_type = pending_retest_order["type"]
         limit_price = pending_retest_order.get("limit_price", pending_retest_order["entry_price"])
+        sl_p = pending_retest_order["sl"]
 
         if (loop_index - pending_retest_order["created_idx"]) > 72:
             missed_trades.append(

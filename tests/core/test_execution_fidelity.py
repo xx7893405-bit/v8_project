@@ -78,6 +78,27 @@ class ExecutionFidelityTest(unittest.TestCase):
         self.assertAlmostEqual(trades[0]["pnl"], -10.1)
         self.assertAlmostEqual(trades[0]["fee"], 0.1)
 
+    def test_retrace_order_expiry_records_its_stop(self):
+        engine = self.engine()
+        order = position(limit_price=100.0, created_idx=0)
+        missed = []
+
+        pending, active, balance = engine._handle_pending_retest_order(
+            order,
+            None,
+            pd.Series({"open": 100.0, "high": 105.0, "low": 95.0, "close": 101.0}),
+            pd.Timestamp("2026-01-02 00:00:00"),
+            73,
+            1000.0,
+            missed,
+        )
+
+        self.assertIsNone(pending)
+        self.assertIsNone(active)
+        self.assertEqual(balance, 1000.0)
+        self.assertEqual(missed[0]["reason"], "ORDER_EXPIRED")
+        self.assertEqual(missed[0]["sl"], 90.0)
+
     def test_tp2_after_stop_does_not_turn_same_bar_into_full_profit(self):
         rows = pd.DataFrame(
             {
