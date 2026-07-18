@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Optional
 
 import numpy as np
@@ -20,6 +21,8 @@ class BearSStrategy:
         confluence_atr_mult: float = 0.25,
         zone_buffer_atr_mult: float = 0.10,
         wick_body_ratio: float = 1.5,
+        allowed_fib_ratios: tuple[float, ...] | None = None,
+        require_triple: bool = False,
     ) -> None:
         self.htf = htf
         self.ltf = ltf
@@ -27,6 +30,10 @@ class BearSStrategy:
         self.confluence_atr_mult = confluence_atr_mult
         self.zone_buffer_atr_mult = zone_buffer_atr_mult
         self.wick_body_ratio = wick_body_ratio
+        self.allowed_fib_ratios = allowed_fib_ratios
+        self.require_triple = require_triple
+        self.fib_filtered_setups = 0
+        self.triple_filtered_setups = 0
         self.precomputed_htf_df: Optional[pd.DataFrame] = None
 
     def signal_timeframe(self) -> str:
@@ -193,6 +200,18 @@ class BearSStrategy:
         if not touched or not confirmed or not directional_close:
             return StrategyDecision()
         if (side == "LONG" and not allowed_long) or (side == "SHORT" and not allowed_short):
+            return StrategyDecision()
+
+        fib_filtered = self.allowed_fib_ratios is not None and not any(
+            math.isclose(float(setup["ratio"]), float(allowed), rel_tol=1e-9, abs_tol=1e-9)
+            for allowed in self.allowed_fib_ratios
+        )
+        triple_filtered = self.require_triple and not bool(setup["triple"])
+        if fib_filtered:
+            self.fib_filtered_setups += 1
+        if triple_filtered:
+            self.triple_filtered_setups += 1
+        if fib_filtered or triple_filtered:
             return StrategyDecision()
 
         atr = float(state["atr"])
