@@ -6,7 +6,7 @@
 
 ## Current phase
 
-Phase 6 進行中：V2A 停損／延遲重驗證與 BearS Fib／Triple 候選分階段實作。
+Phase 6 完成：V2A 停損／延遲重驗證與 BearS Fib／Triple 單變因候選、回歸測試及正式比較均已驗證。
 
 ## Verified baseline
 
@@ -21,6 +21,10 @@ Phase 6 進行中：V2A 停損／延遲重驗證與 BearS Fib／Triple 候選分
 - 全期結果：V2 +210.2279% / MDD -36.5458% / 89 trades / win 40.4494% / PF 1.8409；A -69.9109% / -74.6945% / 282 / 37.5887% / 0.7642；BearS -93.2480% / -96.3746% / 216 / 17.1296% / 0.5058。
 - 2026-07 MTD：V2 +3.9231%（1 trade）；A -5.1183%（1 trade）；BearS -10.2648%（2 trades）。
 - 進場品質診斷：V2A stop<0.10% 共 97 trades、win 8.25%、PF 0.006；BearS Fib 0.5／0.618／0.786 的 PF 分別 0.855／0.345／0.208，Triple PF 0.728、Double 0.368。
+- Entry-quality 正式報告：`reports/entry_quality_benchmark/20260718_btcusdt_entry_quality_risk5_lev20_ea28b7ca3c90c46b/`；完整判讀見 `docs/V2A_BEARS_ENTRY_QUALITY_RESULTS.md`。
+- V2A 0.10% gate：-62.6156%、PF 0.7912，不接受；delay TP1 revalidate：-72.1689%、PF 0.7513，不接受。
+- BearS Fib 0.5：-20.2362%、PF 0.9584，不接受；Triple：+11.2199%、85 trades、PF 1.0496、MDD -70.5630%，只接受為下一輪研究候選；Fib 0.5+Triple 30 trades，僅診斷。
+- 整合驗證：75 tests；baseline 精確重現；snapshot、trade ledger、分年度／side／R／quick-exit／concentration checks 通過。
 - 65 項 unittest、py_compile、diff-check、snapshot identity 與 trade-ledger/final-balance 一致性通過。
 - 31 項 unittest 通過。
 - Canonical market：Binance USDT 永續 `BTC/USDT:USDT`，NFE V2，15m/1h，isolated，10,000 USD，risk-based 1%，最高 3x。
@@ -54,4 +58,4 @@ Phase 6 進行中：V2A 停損／延遲重驗證與 BearS Fib／Triple 候選分
 
 ## Next checkpoint
 
-完成單變因候選與時間安全測試後，跑七組全期及 2026-07 MTD；只有 PF≥1、MDD 改善、樣本≥50 且無單筆獲利集中才接受。
+等待使用者審視結果。若繼續，下一個最小候選為 BearS Triple LONG-only，並需 walk-forward／out-of-sample；未經確認不改預設策略、不參數網格、不合併 `main`、不 push。
