@@ -2,16 +2,18 @@
 
 ## Objective
 
-升級合約策略回測系統，使 closed-candle 訊號、撮合事件、成本帳務與 paper/live 執行可重現且一致，並保留舊版回復點。
+下載 2021-01-01 至今的 Binance BTCUSDT 永續合約資料，並以已升級回測引擎公平比較 NFE V2、NFE V2 A 與 BearS 的全期及 2026-07 月迄今結果。
 
 ## Current phase
 
-Phase 2：Data、Engine、Strategy/Live 已整合並驗證；回測可信度升級完成，正式 live canary 仍受資料與 fill-ledger 缺口阻擋。
+Phase 3：合約資料下載、A 策略相容與三策略比較入口平行準備。
 
 ## Verified baseline
 
 - Rollback：`b6556aa`（`codex/v8-modularization`）；`main`／`v8.0.0` 仍為 `76f6ee4`。
 - Integration：`codex/contract-backtest-parity`，從 `b6556aa` 建立。
+- Benchmark：`codex/contract-v2-a-bears-benchmark`，rollback 為 `3d28f79`。
+- 本輪固定設定：Binance USDT-M `BTCUSDT`；2021-01-01 至最後完整 1m；另跑 2026-07-01 至同截止；10,000 USD、risk-based 1%、3x、maker 0.02%、taker 0.05%、相同滑價與 funding fallback。
 - 31 項 unittest 通過。
 - Canonical market：Binance USDT 永續 `BTC/USDT:USDT`，NFE V2，15m/1h，isolated，10,000 USD，risk-based 1%，最高 3x。
 - 現行成本 baseline：maker 0.02%、taker 0.05%、entry/limit/stop/liq 滑價沿用既有設定；candidate 必須明列 funding 與 mark/last-price 契約。
@@ -28,6 +30,9 @@ Phase 2：Data、Engine、Strategy/Live 已整合並驗證；回測可信度升�
 - Engine：`codex/v8-engine-core`
 - Data：`codex/v8-data-pipeline`
 - Strategy/Live：`codex/v8-strategy-modules`
+- Benchmark Data：`codex/contract-benchmark-data`
+- Benchmark Strategy：`codex/contract-benchmark-strategy`
+- Benchmark Analysis：`codex/contract-benchmark-analysis`
 - 保留中的其他工作：`codex/nfe-v2-a-bears-comparison`、`codex/nfe-v2-a-strategy`、`codex/nfe-v2-a-analysis`、`codex/param-opt`。
 
 ## Known conflicts
@@ -41,4 +46,4 @@ Phase 2：Data、Engine、Strategy/Live 已整合並驗證；回測可信度升�
 
 ## Next checkpoint
 
-先回補並更新永續合約 1m／funding／mark-price 資料；再設計 fill ledger 與 flat-position convergence，通過 Binance testnet shadow 後才評估極小資金 live canary。未經使用者確認，不合併 `main`、不 push。
+Data 完成 rows/gaps/duplicates/fingerprint 驗收，Strategy 完成 A 相容測試，Analysis 完成公平指標入口後，由 Manager 整合並跑全期與 2026-07 月迄今；原始資料與報告使用新路徑，不覆蓋現貨資料或舊報表。
