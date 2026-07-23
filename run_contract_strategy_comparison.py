@@ -38,6 +38,30 @@ RESEARCH_WARNING = (
     "it cannot be claimed as live-parity or fidelity evidence."
 )
 MDD_WARNING = "Candidate MDD uses mark-to-market session equity events; frozen baseline MDD was realized-only."
+FIDELITY_UNSUPPORTED = (
+    "fidelity profile is unsupported: strategy_engine does not consume historical mark-price and funding data"
+)
+BASELINE_CONFIG_KEYS = (
+    "risk_pct",
+    "leverage",
+    "maker_fee",
+    "taker_fee",
+    "slippage_usd",
+    "limit_order_slippage_usd",
+    "stop_loss_slippage_usd",
+    "funding_rate_8h",
+)
+SNAPSHOT_IDENTITY_KEYS = (
+    "exchange",
+    "market_type",
+    "symbol",
+    "rows",
+    "first_open_time",
+    "last_open_time",
+    "file_size",
+    "file_mtime_ns",
+    "fingerprint",
+)
 
 
 def benchmark_config(max_holding_bars: int) -> StrategyConfig:
@@ -269,8 +293,56 @@ def write_parquet(records: list[dict], path: Path) -> None:
         connection.close()
 
 
-def baseline_comparison(results: list[dict], baseline_path: Path) -> tuple[dict, list[dict]]:
+def validate_baseline(
+    baseline_path: Path,
+    candidate_snapshot: dict,
+    candidate_periods: dict[str, tuple[pd.Timestamp, pd.Timestamp]],
+) -> tuple[dict, dict]:
     baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    snapshot = baseline.get("snapshot")
+    if not isinstance(snapshot, dict) or any(key not in snapshot for key in SNAPSHOT_IDENTITY_KEYS):
+        raise RuntimeError("baseline identity is incomplete")
+    mismatches = [
+        f"snapshot.{key}"
+        for key in SNAPSHOT_IDENTITY_KEYS
+        if snapshot[key] != candidate_snapshot.get(key)
+    ]
+    expected_periods = {
+        name: {"start": str(bounds[0]), "end": str(bounds[1])}
+        for name, bounds in candidate_periods.items()
+    }
+    if baseline.get("periods") != expected_periods:
+        mismatches.append("periods")
+
+    expected_config = benchmark_config(96)
+    expected_pairs = {(spec["name"], period) for spec in strategy_specs() for period in candidate_periods}
+    rows = baseline.get("results")
+    if not isinstance(rows, list) or {(row.get("strategy"), row.get("period")) for row in rows} != expected_pairs:
+        mismatches.append("results")
+        rows = []
+    for row in rows:
+        bounds = expected_periods[row["period"]]
+        if row.get("start") != bounds["start"] or row.get("end") != bounds["end"]:
+            mismatches.append(f"{row['strategy']}.{row['period']}.bounds")
+        config = row.get("backtest_config")
+        if not isinstance(config, dict):
+            mismatches.append(f"{row['strategy']}.{row['period']}.config")
+            continue
+        for key in BASELINE_CONFIG_KEYS:
+            if key not in config or config[key] != getattr(expected_config, key):
+                mismatches.append(f"{row['strategy']}.{row['period']}.{key}")
+    if mismatches:
+        raise RuntimeError("baseline identity mismatch: " + ", ".join(sorted(set(mismatches))))
+    return baseline, {
+        "path": str(baseline_path.resolve()),
+        "generated_at": baseline.get("generated_at"),
+        "snapshot": snapshot,
+    }
+
+
+def baseline_comparison(
+    results: list[dict], baseline: dict, identity: dict
+) -> tuple[dict, list[dict]]:
     baseline_rows = {(row["strategy"], row["period"]): row["metrics"] for row in baseline["results"]}
     metric_names = (
         "return_pct",
@@ -289,11 +361,6 @@ def baseline_comparison(results: list[dict], baseline_path: Path) -> tuple[dict,
             for key in metric_names
         }
         comparisons.append({"strategy": result["strategy"], "period": result["period"], "metrics": new, "baseline_deltas": deltas})
-    identity = {
-        "path": str(baseline_path.resolve()),
-        "generated_at": baseline.get("generated_at"),
-        "snapshot": baseline.get("snapshot"),
-    }
     return identity, comparisons
 
 
@@ -303,10 +370,11 @@ def write_reports(
     all_equity: list[dict],
     diagnostics: list[dict],
     manifest: dict,
-    baseline_path: Path,
+    baseline: dict,
+    baseline_identity: dict,
     output_dir: Path,
 ) -> None:
-    baseline_identity, comparisons = baseline_comparison(results, baseline_path)
+    baseline_identity, comparisons = baseline_comparison(results, baseline, baseline_identity)
     warnings = ([RESEARCH_WARNING] if manifest["profile"] == "research" else []) + [MDD_WARNING]
     manifest["baseline"] = baseline_identity
     manifest["warnings"] = warnings[:5]
@@ -374,9 +442,13 @@ def main() -> None:
         "full": clip_period(FULL_START, cutoff, available_start, cutoff),
         "mtd_2026_07": clip_period(MTD_START, cutoff, available_start, cutoff),
     }
-    fidelity_coverage = require_fidelity_data(args.database, *periods["full"]) if args.profile == "fidelity" else None
+    fidelity_coverage = None
+    if args.profile == "fidelity":
+        require_fidelity_data(args.database, *periods["full"])
+        raise RuntimeError(FIDELITY_UNSUPPORTED)
     if not args.baseline.is_file():
         raise FileNotFoundError(f"Baseline report does not exist: {args.baseline}")
+    baseline, baseline_identity = validate_baseline(args.baseline, identity, periods)
     output_dir = args.output_root / args.run_id
     output_dir.mkdir(parents=True, exist_ok=False)
 
@@ -410,7 +482,16 @@ def main() -> None:
         "baseline": str(args.baseline.resolve()),
         "warnings": [],
     }
-    write_reports(results, all_trades, all_equity, diagnostics, manifest, args.baseline, output_dir)
+    write_reports(
+        results,
+        all_trades,
+        all_equity,
+        diagnostics,
+        manifest,
+        baseline,
+        baseline_identity,
+        output_dir,
+    )
     print(json.dumps({"status": "complete", "profile": args.profile, "summary": str(output_dir / "summary.json")}))
 
 

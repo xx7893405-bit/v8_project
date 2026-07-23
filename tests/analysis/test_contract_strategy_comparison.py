@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -8,12 +9,14 @@ import pandas as pd
 
 from run_contract_strategy_comparison import (
     DEFAULT_DATABASE,
+    FIDELITY_UNSUPPORTED,
     assert_same_snapshot,
     benchmark_config,
     calculate_metrics,
     clip_period,
     parse_args,
     snapshot_identity,
+    validate_baseline,
     write_parquet,
 )
 
@@ -63,6 +66,97 @@ class ContractStrategyComparisonTest(unittest.TestCase):
         with patch("sys.argv", ["comparison"]):
             self.assertEqual(parse_args().profile, "fidelity")
         self.assertEqual(parse_args(["--profile", "research"]).profile, "research")
+
+    def test_fidelity_fails_when_coverage_exists_but_engine_consumption_is_unsupported(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch("run_contract_strategy_comparison.verify_manifest", return_value={}),
+            patch(
+                "run_contract_strategy_comparison.snapshot_identity",
+                return_value={
+                    "first_open_time": "2021-01-01",
+                    "last_open_time": "2026-07-18 13:51:00",
+                },
+            ),
+            patch("run_contract_strategy_comparison.require_fidelity_data", return_value={"complete": True}),
+            patch(
+                "sys.argv",
+                [
+                    "comparison",
+                    "--database",
+                    str(Path(directory) / "market.duckdb"),
+                    "--output-root",
+                    directory,
+                    "--run-id",
+                    "must-not-exist",
+                ],
+            ),
+        ):
+            from run_contract_strategy_comparison import main
+
+            with self.assertRaisesRegex(RuntimeError, FIDELITY_UNSUPPORTED):
+                main()
+            self.assertFalse((Path(directory) / "must-not-exist").exists())
+
+    def test_baseline_identity_and_assumptions_are_required(self):
+        snapshot = {
+            "exchange": "binance",
+            "market_type": "swap",
+            "symbol": "BTC/USDT:USDT",
+            "rows": 2,
+            "first_open_time": "2021-01-01 00:00:00",
+            "last_open_time": "2026-07-18 13:51:00",
+            "file_size": 10,
+            "file_mtime_ns": 20,
+            "fingerprint": "frozen",
+        }
+        periods = {
+            "full": (pd.Timestamp("2021-01-01"), pd.Timestamp("2026-07-18 13:51:00")),
+            "mtd_2026_07": (pd.Timestamp("2026-07-01"), pd.Timestamp("2026-07-18 13:51:00")),
+        }
+        config = benchmark_config(96)
+        rows = [
+            {
+                "strategy": strategy,
+                "period": period,
+                "start": str(bounds[0]),
+                "end": str(bounds[1]),
+                "backtest_config": {
+                    key: getattr(config, key)
+                    for key in (
+                        "risk_pct",
+                        "leverage",
+                        "maker_fee",
+                        "taker_fee",
+                        "slippage_usd",
+                        "limit_order_slippage_usd",
+                        "stop_loss_slippage_usd",
+                        "funding_rate_8h",
+                    )
+                },
+            }
+            for strategy in ("nfe_v2", "nfe_v2_a", "bears")
+            for period, bounds in periods.items()
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "baseline.json"
+            baseline = {"generated_at": "now", "snapshot": snapshot, "periods": {
+                name: {"start": str(bounds[0]), "end": str(bounds[1])}
+                for name, bounds in periods.items()
+            }, "results": rows}
+            path.write_text(json.dumps(baseline))
+            self.assertEqual(validate_baseline(path, snapshot, periods)[0], baseline)
+
+            for mutation, message in (
+                (lambda value: value["snapshot"].pop("fingerprint"), "identity is incomplete"),
+                (lambda value: value["periods"]["full"].update(end="bad"), "periods"),
+                (lambda value: value["results"][0]["backtest_config"].update(maker_fee=0), "maker_fee"),
+            ):
+                changed = json.loads(json.dumps(baseline))
+                mutation(changed)
+                path.write_text(json.dumps(changed))
+                with self.subTest(message=message), self.assertRaisesRegex(RuntimeError, message):
+                    validate_baseline(path, snapshot, periods)
 
     def test_duckdb_writes_parquet_without_optional_dependency(self):
         with tempfile.TemporaryDirectory() as directory:
