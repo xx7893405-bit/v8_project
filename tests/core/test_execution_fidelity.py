@@ -105,6 +105,7 @@ class ExecutionFidelityTest(unittest.TestCase):
                 "open": [100.0, 110.0, 90.0],
                 "high": [111.0, 112.0, 121.0],
                 "low": [100.0, 89.0, 88.0],
+                "close": [110.0, 90.0, 120.0],
             },
             index=pd.date_range("2026-01-01 00:00:00", periods=3, freq="1min"),
         )
@@ -219,11 +220,11 @@ class ExecutionFidelityTest(unittest.TestCase):
 
     def test_current_bar_result_is_prefix_invariant(self):
         prefix = pd.DataFrame(
-            {"open": [100.0, 110.0], "high": [111.0, 112.0], "low": [100.0, 89.0]},
+            {"open": [100.0, 110.0], "high": [111.0, 112.0], "low": [100.0, 89.0], "close": [110.0, 90.0]},
             index=pd.date_range("2026-01-01 00:00:00", periods=2, freq="1min"),
         )
         future = pd.DataFrame(
-            {"open": [90.0], "high": [130.0], "low": [80.0]},
+            {"open": [90.0], "high": [130.0], "low": [80.0], "close": [100.0]},
             index=[pd.Timestamp("2026-01-01 00:16:00")],
         )
         engine = self.engine()
@@ -242,6 +243,86 @@ class ExecutionFidelityTest(unittest.TestCase):
                 )
             )
         self.assertEqual(outcomes, ["B", "B"])
+
+    def _fill_and_manage_retrace(self, rows):
+        engine = self.engine(maker_fee=0.0, taker_fee=0.0, stop_loss_slippage_usd=0.0)
+        engine.has_micro_data = True
+        engine.data_feed = MicroFeed(rows)
+        order = position(limit_price=100.0, created_idx=0)
+        curr_time = pd.Timestamp("2026-01-01 00:00:00")
+        bar_end = pd.Timestamp("2026-01-01 00:15:00")
+        bar = pd.Series({"open": 105.0, "high": rows.high.max(), "low": rows.low.min(), "close": rows.close.iloc[-1]})
+        _, active, balance = engine._handle_pending_retest_order(order, None, bar, curr_time, 1, 1000.0, [])
+        entry_bar, management_start = engine._entry_relative_execution_bar(active, bar, curr_time, bar_end)
+        trades = []
+        active, balance = engine._manage_active_position(
+            active, entry_bar, management_start, bar_end, 1, balance, trades, RunConfig()
+        )
+        return active, balance, trades
+
+    def test_pre_entry_tp_does_not_affect_retrace(self):
+        rows = pd.DataFrame(
+            {
+                "open": [105.0, 101.0, 102.0],
+                "high": [121.0, 103.0, 105.0],
+                "low": [104.0, 99.0, 101.0],
+                "close": [106.0, 102.0, 104.0],
+            },
+            index=pd.date_range("2026-01-01", periods=3, freq="1min"),
+        )
+        active, _, trades = self._fill_and_manage_retrace(rows)
+        self.assertIsNotNone(active)
+        self.assertFalse(active["tp1_hit"])
+        self.assertEqual(trades, [])
+
+    def test_post_entry_tp_is_managed(self):
+        rows = pd.DataFrame(
+            {
+                "open": [105.0, 101.0, 102.0],
+                "high": [121.0, 103.0, 121.0],
+                "low": [104.0, 99.0, 101.0],
+                "close": [106.0, 102.0, 120.0],
+            },
+            index=pd.date_range("2026-01-01", periods=3, freq="1min"),
+        )
+        active, _, trades = self._fill_and_manage_retrace(rows)
+        self.assertIsNone(active)
+        self.assertEqual(trades[0]["result"], "TAKE_PROFIT_ALL")
+
+    def test_entry_minute_ambiguity_is_conservative(self):
+        rows = pd.DataFrame(
+            {"open": [105.0], "high": [121.0], "low": [89.0], "close": [100.0]},
+            index=[pd.Timestamp("2026-01-01 00:00:00")],
+        )
+        active, _, trades = self._fill_and_manage_retrace(rows)
+        self.assertIsNone(active)
+        self.assertEqual(trades[0]["result"], "STOP_LOSS")
+
+    def test_equity_events_reconcile_after_force_close(self):
+        engine = self.engine(slippage_usd=0.0, taker_fee=0.0)
+        index = pd.date_range("2026-01-01 00:00:00", periods=97, freq="15min")
+        frame = pd.DataFrame(
+            {"open": 100.0, "high": 105.0, "low": 95.0, "close": 101.0, "volume": 1.0}, index=index
+        )
+        micro = pd.DataFrame(
+            {"open": [100.0, 101.0], "high": [102.0, 103.0], "low": [99.0, 100.0], "close": [101.0, 102.0]},
+            index=[index[-1], index[-1] + pd.Timedelta(minutes=1)],
+        )
+        engine.has_micro_data = True
+        engine.data_feed = MicroFeed(micro)
+        engine._get_signal_frame = lambda: frame
+        engine.strategy = type("Strategy", (), {"signal_timeframe": lambda self: "15m"})()
+
+        session = engine.run_session(resume_snapshot={"balance": 1000.0, "active_position": position(entry_idx=95)})
+
+        self.assertTrue(any(event["mark_source"] == "micro_close" for event in session.equity_events))
+        self.assertEqual(
+            set(session.equity_events[-1]),
+            {"time", "balance", "equity", "position_exposure", "mark_source"},
+        )
+        self.assertEqual(session.equity_events[-1]["mark_source"], "realized_balance")
+        self.assertAlmostEqual(session.equity_events[-1]["equity"], session.balance)
+        self.assertEqual(session.equity_events[-1]["position_exposure"], 0.0)
 
 
 if __name__ == "__main__":

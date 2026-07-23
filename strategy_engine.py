@@ -13,6 +13,8 @@ from market_data import CSVMarketDataFeed, MarketDataFeed
 from strategy_base import BacktestStrategy
 from v8_strategy import V8FvgOverlapStrategy
 
+M1_WITH_CLOSE = [*M1_COLUMNS, "close"]
+
 
 @dataclass
 class BacktestSessionResult:
@@ -22,6 +24,7 @@ class BacktestSessionResult:
     active_position: Optional[dict]
     pending_retest_order: Optional[dict]
     pending_breakout_order: Optional[dict]
+    equity_events: List[dict]
 
 
 class V8OmniscientEye:
@@ -526,6 +529,7 @@ class MultiTimeframeBacktester:
         target_b: float,
         a_is_low: bool,
         b_is_high: bool,
+        ignore_b_at: Optional[pd.Timestamp] = None,
     ) -> str:
         if not getattr(self, "has_micro_data", False):
             return "NONE"
@@ -537,9 +541,11 @@ class MultiTimeframeBacktester:
         )
         if m1_slice.empty:
             return "NONE"
-        for _, row in m1_slice.iterrows():
+        for row_time, row in m1_slice.iterrows():
             hit_a = (row["low"] <= target_a) if a_is_low else (row["high"] >= target_a)
             hit_b = (row["high"] >= target_b) if b_is_high else (row["low"] <= target_b)
+            if ignore_b_at is not None and row_time == ignore_b_at:
+                hit_b = False
             if hit_a and hit_b:
                 return "A"
             if hit_a:
@@ -768,15 +774,17 @@ class MultiTimeframeBacktester:
     ) -> Tuple[Optional[dict], float]:
         tp1 = active_position["tp1"]
         tp2 = active_position["tp2"]
+        ambiguous_entry_time = active_position.get("ambiguous_entry_time")
 
         if is_liq_hit and is_tp1_hit_now:
-            seq = self._check_1m_sequence(curr_time, bar_end_time, liquidation_price, tp1, a_is_low=a_is_low, b_is_high=b_is_high)
+            seq = self._check_1m_sequence(curr_time, bar_end_time, liquidation_price, tp1, a_is_low=a_is_low, b_is_high=b_is_high, ignore_b_at=ambiguous_entry_time)
             if seq == "B":
                 active_position["tp1_hit"] = True
                 if is_tp2_hit_now:
                     tp2_seq = self._check_1m_sequence(
                         curr_time, bar_end_time, liquidation_price, tp2,
                         a_is_low=a_is_low, b_is_high=b_is_high,
+                        ignore_b_at=ambiguous_entry_time,
                     )
                     if tp2_seq == "B":
                         net_pnl, balance_delta, fee = self._calculate_take_profit_all(active_position)
@@ -799,13 +807,14 @@ class MultiTimeframeBacktester:
             return None, balance
 
         if is_sl_hit and is_tp1_hit_now:
-            seq = self._check_1m_sequence(curr_time, bar_end_time, current_sl, tp1, a_is_low=a_is_low, b_is_high=b_is_high)
+            seq = self._check_1m_sequence(curr_time, bar_end_time, current_sl, tp1, a_is_low=a_is_low, b_is_high=b_is_high, ignore_b_at=ambiguous_entry_time)
             if seq == "B":
                 active_position["tp1_hit"] = True
                 if is_tp2_hit_now:
                     tp2_seq = self._check_1m_sequence(
                         curr_time, bar_end_time, current_sl, tp2,
                         a_is_low=a_is_low, b_is_high=b_is_high,
+                        ignore_b_at=ambiguous_entry_time,
                     )
                     if tp2_seq == "B":
                         net_pnl, balance_delta, fee = self._calculate_take_profit_all(active_position)
@@ -949,8 +958,141 @@ class MultiTimeframeBacktester:
         return position, balance
 
     def _signal_bar_end_time(self, start_time: pd.Timestamp) -> pd.Timestamp:
-        signal_timeframe = getattr(self.strategy, "signal_timeframe", lambda: "15m")()
+        signal_timeframe = getattr(getattr(self, "strategy", None), "signal_timeframe", lambda: "15m")()
         return start_time + pd.Timedelta(signal_timeframe)
+
+    def _first_retrace_touch(self, order: dict, curr_time: pd.Timestamp) -> Optional[pd.Timestamp]:
+        if not getattr(self, "has_micro_data", False):
+            return None
+        rows = self.data_feed.load_micro_window(
+            curr_time,
+            self._signal_bar_end_time(curr_time) - pd.Timedelta(nanoseconds=1),
+            M1_COLUMNS,
+        )
+        if rows.empty:
+            return None
+        limit_price = order.get("limit_price", order["entry_price"])
+        touched = rows["low"] <= limit_price if order["type"] == "LONG" else rows["high"] >= limit_price
+        return rows.index[touched][0] if touched.any() else None
+
+    def _entry_relative_execution_bar(
+        self,
+        active_position: dict,
+        curr: pd.Series,
+        curr_time: pd.Timestamp,
+        bar_end_time: pd.Timestamp,
+    ) -> Tuple[pd.Series, pd.Timestamp]:
+        """Exclude pre-entry extremes; the entry minute only keeps adverse movement."""
+        entry_time = active_position.get("ambiguous_entry_time")
+        if entry_time is None:
+            bar = curr.copy()
+            if active_position["type"] == "LONG":
+                bar["high"] = min(bar["high"], active_position["entry_price"])
+            else:
+                bar["low"] = max(bar["low"], active_position["entry_price"])
+            return bar, curr_time
+
+        rows = self.data_feed.load_micro_window(
+            entry_time,
+            bar_end_time - pd.Timedelta(nanoseconds=1),
+            M1_WITH_CLOSE,
+        ).copy()
+        if rows.empty:
+            return curr, curr_time
+        if active_position["type"] == "LONG":
+            rows.loc[entry_time, "high"] = min(rows.loc[entry_time, "high"], active_position["entry_price"])
+        else:
+            rows.loc[entry_time, "low"] = max(rows.loc[entry_time, "low"], active_position["entry_price"])
+        bar = curr.copy()
+        bar["open"] = active_position["entry_price"]
+        bar["high"] = rows["high"].max()
+        bar["low"] = rows["low"].min()
+        bar["close"] = rows["close"].iloc[-1]
+        return bar, entry_time
+
+    def _equity_event(
+        self,
+        event_time: pd.Timestamp,
+        balance: float,
+        position: Optional[dict],
+        mark: Optional[float],
+        mark_source: str,
+    ) -> dict:
+        equity = balance
+        exposure = 0.0
+        if position is not None and mark is not None:
+            quantity = float(position.get("remaining_size", position["size"]))
+            equity += self._directional_pnl(position["type"], quantity, position["entry_price"], mark)
+            equity -= float(position.get("accumulated_funding", 0.0))
+            exposure = quantity * mark * (1.0 if position["type"] == "LONG" else -1.0)
+        return {
+            "time": event_time,
+            "balance": float(balance),
+            "equity": float(equity),
+            "position_exposure": float(exposure),
+            "mark_source": mark_source,
+        }
+
+    def _append_mtm_events(
+        self,
+        events: List[dict],
+        position: dict,
+        balance: float,
+        start_time: pd.Timestamp,
+        end_time: pd.Timestamp,
+        fallback_bar: pd.Series,
+        exit_trade: Optional[dict] = None,
+    ) -> pd.Timestamp:
+        if getattr(self, "has_micro_data", False):
+            rows = self.data_feed.load_micro_window(
+                start_time,
+                end_time - pd.Timedelta(nanoseconds=1),
+                M1_WITH_CLOSE,
+            )
+            has_micro_rows = not rows.empty
+            exit_time = end_time
+            if exit_trade is not None and not rows.empty:
+                result = exit_trade["result"]
+                if result == "TAKE_PROFIT_ALL":
+                    target = position["tp2"]
+                elif result in {"STOP_LOSS", "BREAKEVEN"}:
+                    target = position["sl"]
+                elif result == "LIQUIDATION":
+                    target = position.get("liquidation_price")
+                else:
+                    target = None
+                if target is not None:
+                    if result == "TAKE_PROFIT_ALL":
+                        touched = rows["high"] >= target if position["type"] == "LONG" else rows["low"] <= target
+                    else:
+                        touched = rows["low"] <= target if position["type"] == "LONG" else rows["high"] >= target
+                    if touched.any():
+                        exit_time = rows.index[touched][0]
+                        rows = rows.loc[rows.index < exit_time]
+            event_position = position.copy()
+            event_balance = balance
+            for event_time, row in rows.iterrows():
+                tp1_touched = (
+                    row["high"] >= event_position["tp1"]
+                    if event_position["type"] == "LONG"
+                    else row["low"] <= event_position["tp1"]
+                )
+                if (
+                    tp1_touched
+                    and not event_position.get("tp1_realized", False)
+                    and event_time != event_position.get("ambiguous_entry_time")
+                ):
+                    event_position["tp1_hit"] = True
+                    event_balance = self._realize_tp1_partial(event_position, event_balance)
+                events.append(
+                    self._equity_event(event_time, event_balance, event_position, float(row["close"]), "micro_close")
+                )
+            if has_micro_rows:
+                return exit_time
+        events.append(
+            self._equity_event(end_time, balance, position, float(fallback_bar["close"]), "execution_close_fallback")
+        )
+        return end_time
 
     def _handle_pending_retest_order(
         self,
@@ -991,7 +1133,9 @@ class MultiTimeframeBacktester:
             if curr["low"] <= limit_price:
                 active_position = pending_retest_order
                 active_position["entry_idx"] = loop_index
-                active_position["entry_time"] = curr_time
+                touch_time = self._first_retrace_touch(active_position, curr_time)
+                active_position["entry_time"] = touch_time if touch_time is not None else curr_time
+                active_position["ambiguous_entry_time"] = touch_time
                 active_position["entry_fee"] = (active_position["size"] * active_position["entry_price"]) * self.config.maker_fee
                 balance -= active_position["entry_fee"]
                 return None, active_position, balance
@@ -1000,7 +1144,9 @@ class MultiTimeframeBacktester:
         if curr["high"] >= limit_price:
             active_position = pending_retest_order
             active_position["entry_idx"] = loop_index
-            active_position["entry_time"] = curr_time
+            touch_time = self._first_retrace_touch(active_position, curr_time)
+            active_position["entry_time"] = touch_time if touch_time is not None else curr_time
+            active_position["ambiguous_entry_time"] = touch_time
             active_position["entry_fee"] = (active_position["size"] * active_position["entry_price"]) * self.config.maker_fee
             balance -= active_position["entry_fee"]
             return None, active_position, balance
@@ -1132,6 +1278,7 @@ class MultiTimeframeBacktester:
         active_position: Optional[dict] = resume_snapshot.get("active_position")
         pending_retest_order: Optional[dict] = resume_snapshot.get("pending_retest_order")
         pending_breakout_order: Optional[dict] = resume_snapshot.get("pending_breakout_order")
+        equity_events: List[dict] = list(resume_snapshot.get("equity_events", []))
         lookback = 96
 
         start_index = lookback
@@ -1142,6 +1289,11 @@ class MultiTimeframeBacktester:
             )
         elif start_at is not None:
             start_index = max(start_index, int(df.index.searchsorted(pd.Timestamp(start_at))))
+
+        if not equity_events and active_position is None and start_index < len(df):
+            equity_events.append(
+                self._equity_event(df.index[start_index], balance, active_position, None, "realized_balance")
+            )
 
         for i in range(start_index, len(df)):
             prev = df.iloc[i - 1]
@@ -1161,8 +1313,26 @@ class MultiTimeframeBacktester:
                 pending_breakout_order = None
 
             if active_position is not None:
+                mark_position = active_position.copy()
+                mark_balance = balance
+                mark_start = max(curr_time, pd.Timestamp(active_position.get("entry_time", curr_time)))
+                trade_count = len(trades)
                 active_position, balance = self._manage_active_position(active_position, execution_curr, curr_time, bar_end_time, i, balance, trades, cfg)
+                managed_state = active_position if active_position is not None else (trades[-1] if len(trades) > trade_count else None)
+                if managed_state is not None:
+                    mark_position["accumulated_funding"] = managed_state.get("accumulated_funding", 0.0)
+                    mark_position["liquidation_price"] = managed_state.get("liquidation_price")
+                realized_time = self._append_mtm_events(
+                    equity_events,
+                    mark_position,
+                    mark_balance,
+                    mark_start,
+                    bar_end_time,
+                    execution_curr,
+                    trades[-1] if active_position is None and len(trades) > trade_count else None,
+                )
                 if active_position is None:
+                    equity_events.append(self._equity_event(realized_time, balance, None, None, "realized_balance"))
                     continue
                 after_manage = getattr(self.strategy, "after_manage_position", None)
                 if callable(after_manage):
@@ -1179,10 +1349,30 @@ class MultiTimeframeBacktester:
                 missed_trades,
             )
             if not had_position_before_retest and active_position is not None and active_position.get("entry_idx") == i:
+                entry_bar, management_start = self._entry_relative_execution_bar(
+                    active_position, execution_curr, curr_time, bar_end_time
+                )
+                mark_position = active_position.copy()
+                mark_balance = balance
+                trade_count = len(trades)
                 active_position, balance = self._manage_active_position(
-                    active_position, execution_curr, curr_time, bar_end_time, i, balance, trades, cfg
+                    active_position, entry_bar, management_start, bar_end_time, i, balance, trades, cfg
+                )
+                managed_state = active_position if active_position is not None else (trades[-1] if len(trades) > trade_count else None)
+                if managed_state is not None:
+                    mark_position["accumulated_funding"] = managed_state.get("accumulated_funding", 0.0)
+                    mark_position["liquidation_price"] = managed_state.get("liquidation_price")
+                realized_time = self._append_mtm_events(
+                    equity_events,
+                    mark_position,
+                    mark_balance,
+                    management_start,
+                    bar_end_time,
+                    entry_bar,
+                    trades[-1] if active_position is None and len(trades) > trade_count else None,
                 )
                 if active_position is None:
+                    equity_events.append(self._equity_event(realized_time, balance, None, None, "realized_balance"))
                     continue
 
             if (
@@ -1208,6 +1398,9 @@ class MultiTimeframeBacktester:
             balance += balance_delta
             trades.append(self._record_trade(active_position, df.index[-1], net_pnl, "FORCE_CLOSE", exit_price=exit_price, fee=fee))
             active_position = None
+            equity_events.append(
+                self._equity_event(self._signal_bar_end_time(df.index[-1]), balance, None, None, "realized_balance")
+            )
 
         return BacktestSessionResult(
             trades=trades,
@@ -1216,6 +1409,7 @@ class MultiTimeframeBacktester:
             active_position=active_position,
             pending_retest_order=pending_retest_order,
             pending_breakout_order=pending_breakout_order,
+            equity_events=equity_events,
         )
 
     def run_backtest(self, **kwargs: object) -> Tuple[List[dict], List[dict]]:
