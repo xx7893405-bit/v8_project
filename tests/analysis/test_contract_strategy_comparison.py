@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import duckdb
 import pandas as pd
@@ -11,7 +12,9 @@ from run_contract_strategy_comparison import (
     benchmark_config,
     calculate_metrics,
     clip_period,
+    parse_args,
     snapshot_identity,
+    write_parquet,
 )
 
 
@@ -45,6 +48,29 @@ class ContractStrategyComparisonTest(unittest.TestCase):
         self.assertEqual(empty["trades"], 0)
         self.assertEqual(empty["final_balance"], 10_000.0)
         self.assertIsNone(empty["profit_factor"])
+
+    def test_headline_drawdown_uses_session_equity_events(self):
+        trades = [{"exit_time": "2026-07-02", "entry_balance": 10_000.0, "pnl": 100.0}]
+        events = [
+            {"equity": 10_000.0},
+            {"equity": 8_000.0},
+            {"equity": 10_100.0},
+        ]
+        result = calculate_metrics(trades, missed=0, initial_balance=10_000.0, equity_events=events)
+        self.assertEqual(result["max_drawdown_pct"], -20.0)
+
+    def test_fidelity_is_default_and_research_is_explicit(self):
+        with patch("sys.argv", ["comparison"]):
+            self.assertEqual(parse_args().profile, "fidelity")
+        self.assertEqual(parse_args(["--profile", "research"]).profile, "research")
+
+    def test_duckdb_writes_parquet_without_optional_dependency(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "rows.parquet"
+            write_parquet([{"value": 1}], path)
+            self.assertEqual(
+                duckdb.sql("SELECT value FROM read_parquet(?)", params=[str(path)]).fetchone()[0], 1
+            )
 
     def test_period_clipping(self):
         start, end = clip_period(
