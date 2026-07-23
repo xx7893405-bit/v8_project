@@ -277,6 +277,16 @@ class LiveExecutionEngine:
     def _is_managed_tag(cls, tag: str) -> bool:
         return tag.startswith(cls.MANAGED_PREFIX)
 
+    def _confirmed_entry_quantity(self, result: ExecutionResult) -> float:
+        quantity = float(result.filled_quantity)
+        if not result.exchange_order_id or not hasattr(self.client, "get_fills"):
+            return quantity
+        try:
+            fills = self.client.get_fills({str(result.exchange_order_id)})
+        except Exception:
+            return quantity
+        return max(quantity, sum(float(fill.get("quantity") or 0.0) for fill in fills))
+
     def submit_entry_from_position(self, position: dict) -> ExecutionResult:
         existing = self.client.get_position()
         if existing is not None:
@@ -291,9 +301,9 @@ class LiveExecutionEngine:
                         message=f"Exchange size {actual_size} differs from strategy size {expected_size}; entry skipped.",
                     )
                 return ExecutionResult(
-                    accepted=True,
-                    status="ALREADY_IN_SYNC",
-                    message="An exchange position with the same side already exists; entry skipped.",
+                    accepted=False,
+                    status="POSITION_OWNERSHIP_UNVERIFIED",
+                    message="A matching exchange position exists without managed-order evidence; entry skipped.",
                 )
             return ExecutionResult(
                 accepted=False,
@@ -556,15 +566,24 @@ class LiveExecutionEngine:
             results.extend(self._cancel_if_present(by_tag.get(tags["tp2"])))
         return results
 
-    def reconcile_position(self, position: dict, *, allow_entry: bool) -> tuple[ExecutionResult, list[ExecutionResult]]:
+    def reconcile_position(
+        self, position: dict, *, allow_entry: bool, entry_tag: Optional[str] = None
+    ) -> tuple[ExecutionResult, list[ExecutionResult]]:
         actual = self.client.get_position()
         self.confirmed_position = actual
         size_matches = False
+        managed_position = False
         if actual is None and allow_entry:
+            position["live_entry_tag"] = str(
+                entry_tag
+                or position.get("live_entry_tag")
+                or f"v8-entry-{position.get('entry_mode', 'UNKNOWN')}"
+            )[:32]
             entry_result = self.submit_entry_from_position(position)
             actual = self.client.get_position()
-            if actual is None and entry_result.filled_quantity > 0:
-                actual = {"type": position["type"], "size": entry_result.filled_quantity}
+            confirmed_entry_quantity = self._confirmed_entry_quantity(entry_result)
+            if actual is None and confirmed_entry_quantity > 0:
+                actual = {"type": position["type"], "size": confirmed_entry_quantity}
             elif actual is None and entry_result.accepted:
                 order_id = entry_result.exchange_order_id
                 if not order_id or not hasattr(self.client, "cancel_order"):
@@ -591,6 +610,27 @@ class LiveExecutionEngine:
                         exchange_order_id=order_id,
                         message="Unfilled managed entry was cancelled; snapshot was not advanced.",
                     ), []
+            if actual is not None and entry_result.accepted:
+                actual_size = float(actual.get("size") or 0.0)
+                tolerance = max(1e-12, actual_size * 1e-6)
+                managed_position = bool(
+                    actual.get("type") == position.get("type")
+                    and confirmed_entry_quantity > 0
+                    and abs(actual_size - confirmed_entry_quantity) <= tolerance
+                )
+                if not managed_position:
+                    entry_result = ExecutionResult(
+                        False,
+                        "POSITION_OWNERSHIP_UNVERIFIED",
+                        exchange_order_id=entry_result.exchange_order_id,
+                        message="Observed position was not proven by fills from the submitted managed entry.",
+                        filled_quantity=entry_result.filled_quantity,
+                        average_price=entry_result.average_price,
+                        fee=entry_result.fee,
+                        fee_currency=entry_result.fee_currency,
+                        timestamp=entry_result.timestamp,
+                        exchange_trade_id=entry_result.exchange_trade_id,
+                    )
             self.confirmed_position = actual
         elif actual is None:
             entry_result = ExecutionResult(False, "ENTRY_NOT_AUTHORIZED", message="Restart reconciliation will not recreate an absent entry.")
@@ -600,13 +640,21 @@ class LiveExecutionEngine:
             expected = float(position.get("remaining_size", position["size"]))
             actual_size = float(actual.get("size") or 0.0)
             size_matches = abs(expected - actual_size) <= max(1e-12, expected * 1e-6)
-            status = "ALREADY_IN_SYNC" if size_matches else "POSITION_SIZE_MISMATCH"
-            entry_result = ExecutionResult(status == "ALREADY_IN_SYNC", status, message=f"strategy={expected} exchange={actual_size}")
-        managed_position = bool(position.get("live_entry_tag")) or allow_entry
+            managed_position = bool(
+                not allow_entry
+                and size_matches
+                and self._is_managed_tag(str(position.get("live_entry_tag") or ""))
+                and self.protection_status(position, actual)["protected"]
+            )
+            if managed_position:
+                entry_result = ExecutionResult(True, "ALREADY_IN_SYNC", message=f"strategy={expected} exchange={actual_size}")
+            else:
+                status = "POSITION_SIZE_MISMATCH" if not size_matches else "POSITION_OWNERSHIP_UNVERIFIED"
+                entry_result = ExecutionResult(False, status, message=f"strategy={expected} exchange={actual_size}")
         should_protect = bool(
             actual is not None
             and actual.get("type") == position.get("type")
-            and (size_matches or managed_position)
+            and managed_position
         )
         exits = self.submit_exit_orders(position, actual) if should_protect else []
         if should_protect and all(result.accepted for result in exits):
@@ -649,6 +697,7 @@ class LiveExecutionEngine:
             not self._is_managed_tag(tag)
             or actual.get("type") != expected.get("type")
             or abs(actual_size - expected_size) > tolerance
+            or not self.protection_status(expected, actual)["protected"]
         ):
             return ExecutionResult(
                 False,

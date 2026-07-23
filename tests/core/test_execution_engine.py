@@ -84,7 +84,7 @@ class ExecutionEngineTest(unittest.TestCase):
             [],
         )
 
-    def test_engine_does_not_duplicate_same_side_position(self):
+    def test_engine_does_not_claim_same_side_position_without_managed_evidence(self):
         class Client:
             def get_position(self):
                 return {"type": "LONG", "size": 0.1}
@@ -95,7 +95,8 @@ class ExecutionEngineTest(unittest.TestCase):
         result = LiveExecutionEngine(Client()).submit_entry_from_position(
             {"type": "LONG", "size": 0.1, "entry_price": 60000}
         )
-        self.assertEqual(result.status, "ALREADY_IN_SYNC")
+        self.assertEqual(result.status, "POSITION_OWNERSHIP_UNVERIFIED")
+        self.assertFalse(result.accepted)
 
 
 if __name__ == "__main__":

@@ -137,9 +137,16 @@ def main() -> None:
         return
 
     entry_time = str(active_position.get("entry_time") or "unknown")
-    active_position["live_entry_tag"] = f"v8-entry-{active_position['type']}-{''.join(ch for ch in entry_time if ch.isdigit())[-12:]}"[:32]
     is_new_entry = not previous_position or previous_position.get("entry_time") != active_position.get("entry_time")
-    entry_result, exit_results = engine.reconcile_position(active_position, allow_entry=is_new_entry)
+    entry_tag = f"v8-entry-{active_position['type']}-{''.join(ch for ch in entry_time if ch.isdigit())[-12:]}"[:32]
+    active_position.pop("live_entry_tag", None)
+    if not is_new_entry and str(previous_position.get("live_entry_tag") or "").startswith("v8-"):
+        active_position["live_entry_tag"] = previous_position["live_entry_tag"]
+    entry_result, exit_results = engine.reconcile_position(
+        active_position,
+        allow_entry=is_new_entry,
+        entry_tag=entry_tag,
+    )
     protection = engine.last_protection_status
     confirmed_quantity = max(
         entry_result.filled_quantity,

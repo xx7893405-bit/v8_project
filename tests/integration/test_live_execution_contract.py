@@ -83,9 +83,12 @@ class LiveExecutionContractTest(unittest.TestCase):
 
     def test_partial_fill_protects_only_exchange_size(self):
         actual = {"type": "LONG", "size": 0.4}
-        client = FakeClient(positions=[None, None, actual])
+        client = FakeClient(
+            positions=[None, None, actual],
+            entry_result=ExecutionResult(True, "PARTIALLY_FILLED", exchange_order_id="entry-1", filled_quantity=0.4),
+        )
         entry, exits = LiveExecutionEngine(client).reconcile_position(position(), allow_entry=True)
-        self.assertEqual(entry.status, "OPEN")
+        self.assertEqual(entry.status, "PARTIALLY_FILLED")
         self.assertEqual([order.quantity for order in client.submitted[1:]], [0.4, 0.4])
         self.assertEqual(len(exits), 2)
 
@@ -124,17 +127,63 @@ class LiveExecutionContractTest(unittest.TestCase):
         self.assertEqual(exits, [])
         self.assertEqual(client.submitted, [])
 
+    def test_new_entry_does_not_claim_matching_manual_position(self):
+        client = FakeClient(
+            positions=[{"type": "LONG", "size": 1.0}],
+            open_orders=[{"id": "manual-stop", "clientOrderId": "manual-stop"}],
+        )
+        entry, exits = LiveExecutionEngine(client).reconcile_position(
+            position(), allow_entry=True, entry_tag="v8-entry-LONG-new"
+        )
+        self.assertEqual(entry.status, "POSITION_OWNERSHIP_UNVERIFIED")
+        self.assertFalse(entry.accepted)
+        self.assertEqual(exits, [])
+        self.assertEqual(client.submitted, [])
+        self.assertEqual(client.cancelled, [])
+
+    def test_submitted_but_unfilled_entry_does_not_claim_racing_position(self):
+        client = FakeClient(positions=[None, None, {"type": "LONG", "size": 1.0}])
+        entry, exits = LiveExecutionEngine(client).reconcile_position(
+            position(), allow_entry=True, entry_tag="v8-entry-LONG-new"
+        )
+        self.assertEqual(entry.status, "POSITION_OWNERSHIP_UNVERIFIED")
+        self.assertEqual(exits, [])
+        self.assertEqual([order.order_type for order in client.submitted], ["limit"])
+
+    def test_managed_restart_with_matching_stop_can_continue(self):
+        managed = position(live_entry_tag="v8-entry-LONG-1")
+        stop_tag = LiveExecutionEngine._tags(managed)["stop"]
+        client = FakeClient(
+            positions=[{"type": "LONG", "size": 1.0}],
+            open_orders=[
+                {
+                    "id": "stop-1",
+                    "clientOrderId": stop_tag,
+                    "quantity": 1.0,
+                    "stopPrice": 90.0,
+                    "reduceOnly": True,
+                }
+            ],
+        )
+        entry, exits = LiveExecutionEngine(client).reconcile_position(managed, allow_entry=False)
+        self.assertEqual(entry.status, "ALREADY_IN_SYNC")
+        self.assertTrue(entry.accepted)
+        self.assertTrue(all(result.accepted for result in exits))
+        self.assertNotIn("stop", [order.order_type for order in client.submitted])
+        self.assertNotIn("market", [order.order_type for order in client.submitted])
+
     def test_protection_failure_triggers_reduce_only_market_close(self):
         client = FakeClient(
-            positions=[{"type": "LONG", "size": 0.4}, None],
+            positions=[None, None, {"type": "LONG", "size": 0.4}, None],
+            entry_result=ExecutionResult(True, "PARTIALLY_FILLED", exchange_order_id="entry-1", filled_quantity=0.4),
             protection_result=ExecutionResult(False, "REJECTED"),
             close_result=ExecutionResult(True, "CLOSED", exchange_order_id="close-1", filled_quantity=0.4),
         )
         _, exits = LiveExecutionEngine(client).reconcile_position(
-            position(live_entry_tag="v8-entry-LONG-1"), allow_entry=False
+            position(), allow_entry=True, entry_tag="v8-entry-LONG-1"
         )
         self.assertEqual([result.status for result in exits], ["REJECTED", "CLOSED"])
-        self.assertEqual([order.order_type for order in client.submitted], ["stop", "market"])
+        self.assertEqual([order.order_type for order in client.submitted], ["limit", "stop", "market"])
         self.assertTrue(client.submitted[-1].reduce_only)
 
     def test_unverified_accepted_stop_uses_shared_fail_closed_path(self):
@@ -143,26 +192,28 @@ class LiveExecutionContractTest(unittest.TestCase):
                 return []
 
         client = LaggingOrderClient(
-            positions=[{"type": "LONG", "size": 0.4}, None],
+            positions=[None, None, {"type": "LONG", "size": 0.4}, None],
+            entry_result=ExecutionResult(True, "PARTIALLY_FILLED", exchange_order_id="entry-1", filled_quantity=0.4),
             close_result=ExecutionResult(True, "CLOSED", exchange_order_id="close-1", filled_quantity=0.4),
         )
         _, exits = LiveExecutionEngine(client).reconcile_position(
-            position(live_entry_tag="v8-entry-LONG-1"), allow_entry=False
+            position(), allow_entry=True, entry_tag="v8-entry-LONG-1"
         )
         self.assertIn("PROTECTION_UNVERIFIED", [result.status for result in exits])
-        self.assertEqual([order.order_type for order in client.submitted], ["stop", "limit", "market"])
+        self.assertEqual([order.order_type for order in client.submitted], ["limit", "stop", "limit", "market"])
 
     def test_partial_emergency_close_retries_protection_for_remainder(self):
         client = FakeClient(
-            positions=[{"type": "LONG", "size": 0.4}, {"type": "LONG", "size": 0.1}],
+            positions=[None, None, {"type": "LONG", "size": 0.4}, {"type": "LONG", "size": 0.1}],
+            entry_result=ExecutionResult(True, "PARTIALLY_FILLED", exchange_order_id="entry-1", filled_quantity=0.4),
             protection_result=ExecutionResult(False, "REJECTED"),
             close_result=ExecutionResult(True, "OPEN", exchange_order_id="close-1", filled_quantity=0.3),
         )
         _, exits = LiveExecutionEngine(client).reconcile_position(
-            position(live_entry_tag="v8-entry-LONG-1"), allow_entry=False
+            position(), allow_entry=True, entry_tag="v8-entry-LONG-1"
         )
         self.assertIn("FLAT_NOT_CONVERGED", [result.status for result in exits])
-        self.assertEqual([order.order_type for order in client.submitted], ["stop", "market", "stop"])
+        self.assertEqual([order.order_type for order in client.submitted], ["limit", "stop", "market", "stop"])
         self.assertEqual(client.submitted[-1].quantity, 0.1)
 
     def test_api_lag_partial_fill_is_protected_from_confirmed_quantity(self):
@@ -247,11 +298,31 @@ class LiveExecutionContractTest(unittest.TestCase):
 
     def test_flat_convergence_closes_only_proven_managed_position(self):
         previous = position(live_entry_tag="v8-entry-LONG-1")
-        client = FakeClient(positions=[{"type": "LONG", "size": 1.0}, None])
+        stop_tag = LiveExecutionEngine._tags(previous)["stop"]
+        client = FakeClient(
+            positions=[{"type": "LONG", "size": 1.0}, None],
+            open_orders=[
+                {
+                    "id": "stop-1",
+                    "clientOrderId": stop_tag,
+                    "quantity": 1.0,
+                    "stopPrice": 90.0,
+                    "reduceOnly": True,
+                }
+            ],
+        )
         result, _ = LiveExecutionEngine(client).reconcile_flat(previous)
         self.assertEqual(result.status, "FLAT_CONVERGED")
         self.assertTrue(client.submitted[0].reduce_only)
         self.assertEqual(client.submitted[0].order_type, "market")
+
+    def test_flat_does_not_claim_tagged_position_without_matching_stop(self):
+        previous = position(live_entry_tag="v8-entry-LONG-1")
+        client = FakeClient(positions=[{"type": "LONG", "size": 1.0}])
+        result, actions = LiveExecutionEngine(client).reconcile_flat(previous)
+        self.assertEqual(result.status, "FLAT_OWNERSHIP_UNPROVEN")
+        self.assertEqual(actions, [])
+        self.assertEqual(client.submitted, [])
 
     def test_flat_does_not_touch_unproven_position_or_manual_order(self):
         client = FakeClient(

@@ -94,6 +94,9 @@ class RunLiveIncrementalTest(unittest.TestCase):
                 run_live_trading.main()
 
         self.assertTrue(engine.reconcile_position.call_args.kwargs["allow_entry"])
+        submitted_position = engine.reconcile_position.call_args.args[0]
+        self.assertNotIn("live_entry_tag", submitted_position)
+        self.assertTrue(engine.reconcile_position.call_args.kwargs["entry_tag"].startswith("v8-entry-LONG-"))
 
     def test_protection_failure_keeps_old_snapshot_and_retry_does_not_duplicate_fill(self):
         old_snapshot = {"as_of": "2026-01-02 12:00:00", "active_position": None}
