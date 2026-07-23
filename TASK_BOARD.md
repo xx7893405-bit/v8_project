@@ -31,6 +31,8 @@
 | LIVE-003 | in_progress | Execution / `codex/fidelity-execution` | MGR-007 | `execution_engine.py`、`run_live_trading.py`、live execution tests | fill 後同輪保護或安全失敗；managed-only flat convergence；idempotent fill ledger |
 | DATA-005 | done | Data / `codex/fidelity-data` | MGR-007 | downloader／DuckDB feed／`tests/data/**` | `e52e185` → integration `b28cb60`；真實 snapshot identity 與 18 tests 通過 |
 | BENCH-005 | in_progress | Backtest / `codex/fidelity-report` | ENG-002, DATA-005 | comparison runner、analysis tests、獨立 fidelity reports | manifest／Parquet／MTM MDD；同快照 baseline/candidate；明確 research/fidelity profile |
+| LIVE-004 | in_progress | Execution / `codex/fidelity-execution` | LIVE-003, AUD-001 | existing-position ownership gate、execution tests | 無 exchange-side managed 證據時不得保護、平倉或前進 snapshot |
+| BENCH-006 | ready | Backtest / `codex/fidelity-report` | BENCH-005, AUD-001 | fidelity capability gate、baseline identity tests | engine 未消費 mark/funding 前 fidelity 永遠 fail closed；baseline identity 不符即停止 |
 | AUD-001 | ready | Audit / 唯讀 | LIVE-003, BENCH-005 | 時序、資料、成本、live parity 稽核 | 無 Critical／High；ledger/equity/data identity 對帳 |
 | SHADOW-001 | blocked | Execution / testnet-shadow | LIVE-003, AUD-001 | testnet／paper 執行證據 | scripted lifecycle 通過；自然訊號觀察；需外部執行授權與時間 |
 
@@ -40,4 +42,5 @@
 - 實際帳戶 fee tier、歷史 funding 與 mark-price dataset 尚未提供；不偽造精準成本。
 - Live fill ledger 與 flat-position convergence 尚未完成，禁止直接宣稱 production-ready。
 - 歷史 funding／mark-price 尚未下載；DATA-005 僅建立 schema 與嚴格門檻，正式 fidelity run 前需另行取得資料。
+- Final Audit 發現兩項 High dependency：現有倉位 ownership 證據不足，以及 fidelity profile 尚未真正消費 mark/funding；LIVE-004、BENCH-006 完成前不得宣稱可交付實盤。
 - NFE V2 A／BearS 與 `param-opt` 的未提交 worktree 全數保留且禁止修改。
