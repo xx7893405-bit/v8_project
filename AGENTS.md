@@ -23,6 +23,34 @@
 - Manager 專責整合、完整驗證及維護 `PROJECT_STATE.md`、`TASK_BOARD.md`、`docs/ADR/`；執行 Agent 不得自行修改管理狀態或共用契約。
 - 專案檔案、Git 狀態、測試與可重現回測是事實來源；對話上下文只作輔助。
 
+### Hermes 最小協調介面
+
+- Hermes 是主管角色，不是額外服務；沿用 `.agents/skills/v8-manager/SKILL.md` 的無狀態 Manager 流程。
+- `PROJECT_STATE.md` 與 `TASK_BOARD.md` 仍是唯一狀態來源；`coordination/PROJECT_STATE.md` 與 `coordination/TASKS.md` 只提供入口，不複製內容。
+- 正式實驗索引記錄於 `coordination/EXPERIMENTS.jsonl`；大型報表、交易明細與完整日誌只保存路徑，不寫入索引或主管摘要。
+- 任務使用 `tasks/TASK_TEMPLATE.md`，每項任務只有一個 Owner，並明列可讀、可寫、禁止範圍、輸入版本、輸出與停止條件。
+- 專案自訂 Agent 位於 `.codex/agents/`：`strategy`、`data`、`backtest`、`audit`。只有互相獨立且邊界明確的工作才委派；結果只回傳短摘要與產出路徑。
+- 正式全期間回測只能由 `backtest` Agent 執行；其他 Agent 只可執行單元測試、smoke test 或明確限定的小型資料切片。
+- `audit` Agent 預設唯讀；跨 ownership 問題建立 dependency task，不直接跨區修改。
+
+### Token Cost Analyzer
+
+- 每個 Agent 每次執行都必須記錄：input tokens、output tokens、執行時間、cache hits、讀取檔案、修改檔案及預估成本；若供應商未提供精確數值，須標示估算方式，不得將估算值當成實際值。
+- Manager 每日彙整 Token 使用報告，至少列出各 Agent 的上述指標與合計，並標示最高成本 Agent、重複 Prompt、重複檔案讀取、可利用 Cache 的機會及具體最佳化建議。
+- Agent 應避免重複載入相同 Context 或原始資料；已有可信且仍有效的摘要時優先讀取摘要，只在驗證、摘要失效或任務確實需要完整細節時重讀原始檔案。
+- Manager 應以降低重複 Context 讀取為首要最佳化方向，並在每日報告中追蹤改用摘要、共用快取或縮小讀取範圍後的 Token 與成本變化。
+
+## 專案級回測 Skills
+
+- 以下 Skills 只安裝於 `.agents/skills/`，不得複製到全域 skills 目錄。使用者明確點名 `$skill-name` 時必須讀取對應 `SKILL.md`；描述符合時也應主動套用。
+- `$backtest-auditor`：審查回測可信度、時間順序、指標與可重現性。觸發例：「稽核這份回測是否失真」。
+- `$data-integrity-review`：審查資料快照、缺口、重複、未收盤 K 線、時區、重採樣與市場混用。觸發例：「正式回測前檢查資料」。
+- `$execution-cost-review`：審查成交順序、滑價、maker/taker、funding、部分出場與強平。觸發例：「檢查費用與成交是否過度樂觀」。
+- `$optimization-robustness`：審查參數搜尋、walk-forward、OOS、穩定區域與成本敏感度。觸發例：「驗證這次最佳化有沒有 overfit」。
+- `$factor-research-review`：審查因子時間可得性、洩漏、增量價值、換手與跨區間穩定性。觸發例：「審查新 POC 因子」。
+- `$token-efficient-backtest-workflow`：以本地 Python/DuckDB 執行大量運算，只讓 Agent 讀摘要與必要的異常樣本。執行、比較或診斷正式回測時預設搭配使用。
+- 所有上述 Skills 均不得讓 LLM 逐根 K 線、逐筆交易或逐組參數計算；完整表格保存為 Parquet，設定與摘要保存為 JSON，結論保存為 Markdown。Agent 預設只讀 `summary.json` 與報告，發現異常後才以 Python/DuckDB 查詢最多 20 筆必要樣本。
+
 ## 變更前確認
 
 開始修改前確認：

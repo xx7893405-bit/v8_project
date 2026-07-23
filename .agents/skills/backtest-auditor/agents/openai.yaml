@@ -1,0 +1,4 @@
+interface:
+  display_name: "Backtest Auditor"
+  short_description: "Audit V8 backtest validity and result trustworthiness"
+  default_prompt: "Use $backtest-auditor to audit this V8 backtest for distortion risks."

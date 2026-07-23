@@ -25,6 +25,7 @@
 | DATA-004 | done | Data Agent / `codex/spot-perp-data` | MGR-005 | paired 1m loader、共同索引、完整 resample、audit tests | `e1a197e` → `59c08dc`；共同 2,896,605 rows；各 TF 索引相同 |
 | ANL-004 | done | Analysis Agent / `codex/spot-perp-analysis` | MGR-005, DATA-004 | 六組 runner、basis／trade-overlap／grouped reports | `4479cb9` → `5316c44`；六組與 grouped reports 完成 |
 | BENCH-004 | done | Manager / `codex/spot-vs-perp-2021-2026` | DATA-004, ANL-004 | 整合、完整測試、正式回測與因果判讀 | 78 tests；snapshot `d67917d4724ab20d`；六份 ledger 與 final balance 相符 |
+| MGR-006 | done | Manager / `codex/spot-vs-perp-2021-2026` | — | Hermes 協調入口、任務模板、四個專案 Agent 設定 | TOML／JSONL 解析與 diff-check 通過；未改交易行為 |
 
 ## Current blockers
 

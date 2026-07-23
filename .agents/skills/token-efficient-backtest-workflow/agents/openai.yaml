@@ -1,0 +1,4 @@
+interface:
+  display_name: "Token-Efficient Backtest"
+  short_description: "Run V8 backtests with compact summaries and bounded samples"
+  default_prompt: "Use $token-efficient-backtest-workflow to run this V8 backtest efficiently."

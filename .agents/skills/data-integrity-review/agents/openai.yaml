@@ -1,0 +1,4 @@
+interface:
+  display_name: "Data Integrity Review"
+  short_description: "Review V8 market-data integrity and temporal alignment"
+  default_prompt: "Use $data-integrity-review to review this V8 dataset and feed path."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Execution Cost Review"
+  short_description: "Review V8 fills, slippage, fees, funding, and liquidation"
+  default_prompt: "Use $execution-cost-review to audit V8 execution and trading costs."

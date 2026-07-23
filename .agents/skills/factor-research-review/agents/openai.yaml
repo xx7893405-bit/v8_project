@@ -1,0 +1,4 @@
+interface:
+  display_name: "Factor Research Review"
+  short_description: "Review V8 factors for leakage, validity, and stability"
+  default_prompt: "Use $factor-research-review to review this V8 factor research change."

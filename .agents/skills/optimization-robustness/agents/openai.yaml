@@ -1,0 +1,4 @@
+interface:
+  display_name: "Optimization Robustness"
+  short_description: "Test V8 optimizations for stability and overfitting"
+  default_prompt: "Use $optimization-robustness to validate this V8 parameter optimization."

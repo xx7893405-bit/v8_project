@@ -6,10 +6,11 @@
 
 ## Current phase
 
-Phase 7 完成：Spot／Perp 成對資料契約、六組比較、ledger 與交易重疊診斷已驗證。
+Phase 7 完成：Spot／Perp 成對資料契約、六組比較、ledger 與交易重疊診斷已驗證；Hermes 最小協調介面已加入，未改動交易行為。
 
 ## Verified baseline
 
+- Hermes MVP：根目錄狀態檔維持唯一事實來源；新增 `coordination/` 相容入口、任務模板與 `strategy`／`data`／`backtest`／`audit` 專案 Agent 設定。
 - Rollback：`b6556aa`（`codex/v8-modularization`）；`main`／`v8.0.0` 仍為 `76f6ee4`。
 - Integration：`codex/contract-backtest-parity`，從 `b6556aa` 建立。
 - Benchmark：`codex/contract-v2-a-bears-benchmark`，rollback 為 `3d28f79`。
