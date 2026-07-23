@@ -1,6 +1,6 @@
 import unittest
 
-from execution_engine import CcxtExecutionClient, ExecutionOrder, LiveExecutionEngine
+from execution_engine import CcxtExecutionClient, ExecutionOrder, ExecutionResult, LiveExecutionEngine
 
 
 class FakeExchange:
@@ -52,7 +52,7 @@ class ExecutionEngineTest(unittest.TestCase):
 
             def submit_order(self, order):
                 self.orders.append(order)
-                return type("Result", (), {"status": "ok"})()
+                return ExecutionResult(True, "ok")
 
             def get_open_orders(self):
                 return []
@@ -64,11 +64,15 @@ class ExecutionEngineTest(unittest.TestCase):
         self.assertEqual([order.order_type for order in client.orders], ["stop", "limit"])
         self.assertTrue(all(order.reduce_only for order in client.orders))
         self.assertEqual(client.orders[0].leverage, 2.0)
+        self.assertTrue(all(order.client_tag.startswith("v8-") for order in client.orders))
 
     def test_engine_does_not_duplicate_protective_orders(self):
         class Client:
             def get_open_orders(self):
-                return [{"clientOrderId": "protective-stop"}, {"clientOrderId": "take-profit"}]
+                return [
+                    {"clientOrderId": "v8-stop-v8entry"},
+                    {"clientOrderId": "v8-tp2-v8entry"},
+                ]
 
             def submit_order(self, order):
                 raise AssertionError("protective order should be skipped")

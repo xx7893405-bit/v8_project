@@ -94,15 +94,7 @@ def main() -> None:
         atomic_json_write(state_path, payload)
         print("Initialized live state from the latest closed bar; historical positions were not mirrored.")
         return
-    if active_position is None:
-        atomic_json_write(state_path, payload)
-        print("No active simulated position to mirror into live execution.")
-        return
-
-    entry_time = str(active_position.get("entry_time") or "unknown")
-    active_position["live_entry_tag"] = f"entry-{active_position['type']}-{''.join(ch for ch in entry_time if ch.isdigit())[-12:]}"[:32]
     previous_position = previous_snapshot.get("active_position") if previous_snapshot else None
-    is_new_entry = not previous_position or previous_position.get("entry_time") != active_position.get("entry_time")
 
     if args.dry_run:
         client = DryRunExecutionClient()
@@ -113,13 +105,52 @@ def main() -> None:
             args.exchange, args.ccxt_symbol, sandbox=args.sandbox, margin_mode=args.margin_mode
         )
     engine = LiveExecutionEngine(client)
+    previous_execution = previous_payload.get("last_execution") or {}
+    known_order_ids = previous_execution.get("managed_order_ids") or []
+    existing_fills = previous_payload.get("fill_ledger") or []
+
+    def persist_attempt(primary, actions, *, advance_snapshot: bool, protection=None) -> None:
+        results = [primary, *actions]
+        fills, managed_order_ids = engine.collect_fills(results, known_order_ids)
+        failures = [result.status for result in results if not result.accepted]
+        if not advance_snapshot and not failures:
+            failures = ["PROTECTION_UNVERIFIED"]
+        payload["snapshot"] = snapshot if advance_snapshot else previous_snapshot
+        payload["fill_ledger"] = engine.merge_fills(existing_fills, fills)
+        payload["last_execution"] = {
+            "snapshot_advanced": advance_snapshot,
+            "entry_status": primary.status,
+            "entry_order_id": primary.exchange_order_id,
+            "exit_statuses": [result.status for result in actions],
+            "failure_statuses": failures,
+            "managed_order_ids": managed_order_ids,
+        }
+        if protection is not None:
+            payload["last_execution"]["protection"] = protection
+        atomic_json_write(state_path, payload)
+
+    if active_position is None:
+        flat_result, action_results = engine.reconcile_flat(previous_position)
+        flat_safe = flat_result.accepted and all(result.accepted for result in action_results)
+        persist_attempt(flat_result, action_results, advance_snapshot=flat_safe)
+        print(f"flat: {flat_result.status} {flat_result.message}")
+        return
+
+    entry_time = str(active_position.get("entry_time") or "unknown")
+    active_position["live_entry_tag"] = f"v8-entry-{active_position['type']}-{''.join(ch for ch in entry_time if ch.isdigit())[-12:]}"[:32]
+    is_new_entry = not previous_position or previous_position.get("entry_time") != active_position.get("entry_time")
     entry_result, exit_results = engine.reconcile_position(active_position, allow_entry=is_new_entry)
-    payload["last_execution"] = {
-        "entry_status": entry_result.status,
-        "entry_order_id": entry_result.exchange_order_id,
-        "exit_statuses": [result.status for result in exit_results],
-    }
-    atomic_json_write(state_path, payload)
+    protection = engine.last_protection_status
+    confirmed_quantity = max(
+        entry_result.filled_quantity,
+        float((engine.confirmed_position or {}).get("size") or 0.0),
+    )
+    safe = (
+        entry_result.accepted
+        and all(result.accepted for result in exit_results)
+        and (confirmed_quantity <= 0 or protection["protected"])
+    )
+    persist_attempt(entry_result, exit_results, advance_snapshot=safe, protection=protection)
 
     print(f"entry: {entry_result.status} {entry_result.message}")
     for result in exit_results:
