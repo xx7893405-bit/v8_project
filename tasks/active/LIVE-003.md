@@ -1,7 +1,7 @@
 ```yaml
 task_id: LIVE-003
 title: Protected fills, managed flat convergence, and live fill ledger
-status: in_progress
+status: done
 owner: execution
 reviewer: audit
 depends_on: [MGR-007]

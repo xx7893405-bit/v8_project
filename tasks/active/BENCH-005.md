@@ -1,7 +1,7 @@
 ```yaml
 task_id: BENCH-005
 title: Reproducible fidelity reports and formal corrected-engine comparison
-status: in_progress
+status: done
 owner: backtest
 reviewer: audit
 depends_on: [ENG-002, DATA-005]

@@ -6,12 +6,16 @@
 
 ## Current phase
 
-Phase 8 進行中：`codex/backtest-live-fidelity` 從 checkpoint `b7cfc20` 啟動；先凍結 Engine／Execution／Data 契約，再平行實作，尚未執行 candidate 正式全期回測。
+Phase 8 已完成：`codex/backtest-live-fidelity` 整合至 `ed3a3b1`；105 tests 通過，Final Audit 無 Critical／High。正式 candidate 僅執行一次 explicit `research` 全期回測；historical mark/funding 尚未接入，因此 `fidelity` 刻意 fail closed。
 
 ## Verified baseline
 
 - 本輪 rollback：`b7cfc20`；標準資料 SHA-256 `5b8e0da5a65338b5ca14ca6ee919331f82db4df4148edde44b4e046f433a5965`；期間 2021-01-01～2026-07-18 13:51 UTC。
 - 本輪固定設定：10,000 USD、risk-based 5%、20x 上限、maker 0.02%、taker 0.05%；baseline 使用既有 contract benchmark，不覆寫。
+- V2 frozen baseline：+210.2279%、realized-only MDD -36.5458%、89 trades、win 40.4494%、PF 1.8409、final 31,022.79。
+- V2 corrected research candidate：+210.0220%、MTM MDD -39.4068%、89 trades、win 40.4494%、PF 1.8393、final 31,002.20；資料與成本相同，final delta -20.59。MDD 因計算口徑不同不可直接視為純績效退化。
+- Research artifact：`reports/contract_fidelity/20260723T073952Z_76156eb/`；591 trades、93,614 equity events、6 diagnostics，全部 ending reconciliation error = 0。
+- Final Audit dependency fixes：existing-position ownership gate `9bd95d2`；unsupported fidelity 與 baseline identity gate `ed3a3b1`。
 - Hermes MVP：根目錄狀態檔維持唯一事實來源；新增 `coordination/` 相容入口、任務模板與 `strategy`／`data`／`backtest`／`audit` 專案 Agent 設定。
 - Rollback：`b6556aa`（`codex/v8-modularization`）；`main`／`v8.0.0` 仍為 `76f6ee4`。
 - Integration：`codex/contract-backtest-parity`，從 `b6556aa` 建立。
@@ -66,10 +70,10 @@ Phase 8 進行中：`codex/backtest-live-fidelity` 從 checkpoint `b7cfc20` 啟�
 - NFE V2 A／BearS worktree 有進行中未提交修改，本輪禁止觸碰。
 - `codex/param-opt` 有未提交的 `strategy_engine.py` 與研究腳本，本輪不採用、不覆蓋。
 - 舊 `data/market_data.duckdb` 快照有大量缺口且不可作正式評估；新標準資料庫已補齊至 2026-07-18 13:51 UTC 且 gaps=0。
-- Live 已做到 closed-bar 增量、fill 後保護與冪等 reconcile，但交易所實際 fills 尚未回寫策略帳本，策略轉 flat 也不會自動平掉不一致的交易所倉位。
-- 歷史逐期 funding 與 mark-price 清算資料尚未接入；目前只有明確方向的固定 funding fallback。
-- 本輪 MDD 由已平倉交易 equity 計算，未包含持倉中的 mark-to-market 路徑；歷史 funding 未下載，使用固定 0.01%/8h fallback。
+- Live 已做到 closed-bar 增量、fill 後保護、managed-only flat convergence 與冪等 fill ledger；無 exchange-side managed 證據時不接管既有倉位。
+- 歷史逐期 funding 與 mark-price 尚未接入；research 使用固定 0.01%/8h funding 與 trade-price proxy，且不得宣稱 live parity。
+- Candidate headline MDD 已使用持倉中的 1m mark-to-market equity；frozen baseline 仍是 realized-only MDD，報告會明示口徑差異。
 
 ## Next checkpoint
 
-整合 ENG-002、LIVE-003、DATA-005 的已驗證 commits；之後由 backtest Agent 補正式 manifest／Parquet／MTM 報告並執行同快照 baseline/candidate 對照。
+若要解除 research-only 限制，另建 Engine/Data dependency task，把 historical mark-price 與 funding 真正接入回測計算；若要宣稱可安全連實盤，另執行 testnet/shadow lifecycle 並驗證實際 fee tier、partial fill、重啟與斷線恢復。

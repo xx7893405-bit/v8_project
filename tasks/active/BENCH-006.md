@@ -1,7 +1,7 @@
 ```yaml
 task_id: BENCH-006
 title: Prevent false fidelity claims and validate baseline identity
-status: ready
+status: done
 
 owner: fidelity_report
 reviewer: fidelity_final_audit

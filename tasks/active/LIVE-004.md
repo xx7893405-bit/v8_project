@@ -1,7 +1,7 @@
 ```yaml
 task_id: LIVE-004
 title: Fail closed on unowned existing exchange positions
-status: in_progress
+status: done
 
 owner: fidelity_execution
 reviewer: fidelity_final_audit
