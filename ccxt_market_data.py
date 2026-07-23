@@ -32,6 +32,95 @@ EXPECTED_MINUTES = {
     "4h": 240,
     "1d": 1440,
 }
+MARK_PRICE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS mark_price_1m (
+    exchange VARCHAR NOT NULL, market_type VARCHAR NOT NULL, symbol VARCHAR NOT NULL,
+    open_time TIMESTAMP NOT NULL, open DOUBLE NOT NULL, high DOUBLE NOT NULL,
+    low DOUBLE NOT NULL, close DOUBLE NOT NULL, ingested_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (exchange, market_type, symbol, open_time)
+)
+"""
+FUNDING_RATE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS funding_rate (
+    exchange VARCHAR NOT NULL, market_type VARCHAR NOT NULL, symbol VARCHAR NOT NULL,
+    funding_time TIMESTAMP NOT NULL, funding_rate DOUBLE NOT NULL, ingested_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (exchange, market_type, symbol, funding_time)
+)
+"""
+
+
+class FidelityDataUnavailableError(RuntimeError):
+    """Required historical mark-price or funding data is unavailable."""
+
+
+def ensure_fidelity_schema(connection: duckdb.DuckDBPyConnection) -> None:
+    connection.execute(MARK_PRICE_SCHEMA)
+    connection.execute(FUNDING_RATE_SCHEMA)
+
+
+def require_fidelity_data(
+    database_path: str | Path,
+    start: str | pd.Timestamp,
+    end: str | pd.Timestamp,
+) -> dict:
+    start_time = pd.Timestamp(start)
+    end_time = pd.Timestamp(end)
+    start_time = start_time.tz_convert("UTC").tz_localize(None) if start_time.tzinfo else start_time
+    end_time = end_time.tz_convert("UTC").tz_localize(None) if end_time.tzinfo else end_time
+    if start_time > end_time or start_time.floor("min") != start_time or end_time.floor("min") != end_time:
+        raise FidelityDataUnavailableError("fidelity range must be ordered and minute-aligned")
+    try:
+        connection = duckdb.connect(str(database_path), read_only=True)
+    except duckdb.Error as exc:
+        raise FidelityDataUnavailableError("fidelity database is unavailable") from exc
+    try:
+        tables = {row[0] for row in connection.execute("SHOW TABLES").fetchall()}
+        missing = {"mark_price_1m", "funding_rate"} - tables
+        if missing:
+            raise FidelityDataUnavailableError("missing fidelity tables: " + ", ".join(sorted(missing)))
+        mark = connection.execute(
+            """
+            SELECT count(*), min(open_time), max(open_time),
+                   count(DISTINCT open_time),
+                   count(*) FILTER (WHERE exchange <> 'binance' OR market_type <> 'swap'
+                       OR symbol <> 'BTC/USDT:USDT' OR epoch_ms(open_time) % 60000 <> 0
+                       OR NOT isfinite(open) OR NOT isfinite(high) OR NOT isfinite(low)
+                       OR NOT isfinite(close) OR open <= 0 OR high < greatest(open, close, low)
+                       OR low <= 0 OR low > least(open, close, high))
+            FROM mark_price_1m WHERE open_time BETWEEN ? AND ?
+            """,
+            [start_time, end_time],
+        ).fetchone()
+        expected_mark_rows = int((end_time - start_time) / pd.Timedelta(minutes=1)) + 1
+        if mark[0] != expected_mark_rows or mark[3] != expected_mark_rows or mark[4]:
+            raise FidelityDataUnavailableError("mark-price coverage is incomplete or invalid")
+        expected_funding = pd.date_range(start_time.ceil("8h"), end_time, freq="8h")
+        if not connection.execute(
+            "SELECT count(*) FROM funding_rate WHERE exchange='binance' AND market_type='swap' AND symbol='BTC/USDT:USDT'"
+        ).fetchone()[0]:
+            raise FidelityDataUnavailableError("funding-rate series is absent")
+        funding = connection.execute(
+            """
+            SELECT funding_time, funding_rate FROM funding_rate
+            WHERE exchange = 'binance' AND market_type = 'swap' AND symbol = 'BTC/USDT:USDT'
+              AND funding_time BETWEEN ? AND ? ORDER BY funding_time
+            """,
+            [start_time, end_time],
+        ).fetchall()
+        if [row[0] for row in funding] != list(expected_funding.to_pydatetime()) or any(
+            not math.isfinite(row[1]) for row in funding
+        ):
+            raise FidelityDataUnavailableError("funding-rate coverage is incomplete or invalid")
+        return {
+            "start": start_time.isoformat(),
+            "end": end_time.isoformat(),
+            "mark_price_rows": mark[0],
+            "funding_rows": len(funding),
+        }
+    except duckdb.Error as exc:
+        raise FidelityDataUnavailableError("fidelity schema or contents are invalid") from exc
+    finally:
+        connection.close()
 
 
 @dataclass(frozen=True)

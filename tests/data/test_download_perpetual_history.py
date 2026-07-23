@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 import duckdb
@@ -11,6 +12,9 @@ from download_perpetual_history import (
     audit_database,
     download_history,
     ensure_schema,
+    DataIntegrityError,
+    require_database_integrity,
+    verify_manifest,
 )
 
 
@@ -103,6 +107,55 @@ class PerpetualHistoryDownloaderTest(unittest.TestCase):
         self.assertEqual(inserted, 0)
         self.assertEqual(count, 2)
         self.assertEqual(second_session.calls, [])
+
+    def test_read_only_audit_and_manifest_gate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "history.duckdb"
+            manifest = Path(directory) / "manifest.json"
+            connection = duckdb.connect(str(database))
+            ensure_schema(connection)
+            connection.execute(
+                """INSERT INTO ohlcv_1m VALUES
+                ('binance', 'swap', 'BTC/USDT:USDT', '2021-01-01 00:00:00', 1, 2, .5, 1, 1, now())"""
+            )
+            connection.close()
+            before = database.read_bytes()
+            audit = require_database_integrity(
+                audit_database(database, now_ms=int(pd.Timestamp("2021-01-01 00:02:00Z").timestamp() * 1000))
+            )
+            manifest.write_text(json.dumps({
+                "exchange": "binance", "market_type": "swap", "symbol": "BTC/USDT:USDT",
+                "interval": "1m", "closed_candles_only": True, "row_count": 1,
+                "first_open_utc": "2021-01-01 00:00:00", "last_open_utc": "2021-01-01 00:00:00",
+                "sha256": audit["sha256"],
+            }))
+
+            identity = verify_manifest(database, manifest)
+
+            self.assertEqual(database.read_bytes(), before)
+            self.assertEqual(identity["rows"], 1)
+            self.assertEqual(json.loads(json.dumps(identity))["sha256"], audit["sha256"])
+            manifest.write_text(manifest.read_text().replace(audit["sha256"], "bad"))
+            with self.assertRaisesRegex(DataIntegrityError, "manifest mismatch: sha256"):
+                verify_manifest(database, manifest)
+
+    def test_integrity_gate_rejects_gap_and_invalid_ohlcv(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database = Path(directory) / "history.duckdb"
+            connection = duckdb.connect(str(database))
+            ensure_schema(connection)
+            connection.execute(
+                """INSERT INTO ohlcv_1m VALUES
+                ('binance', 'swap', 'BTC/USDT:USDT', '2021-01-01 00:00:00', 1, 2, .5, 1, 1, now()),
+                ('binance', 'swap', 'BTC/USDT:USDT', '2021-01-01 00:02:00', 1, 1, .5, 2, 1, now())"""
+            )
+            connection.close()
+
+            audit = audit_database(database, now_ms=int(pd.Timestamp("2021-01-01 00:04:00Z").timestamp() * 1000))
+
+            self.assertEqual(audit["invalid_ohlcv_rows"], 1)
+            with self.assertRaisesRegex(DataIntegrityError, "gap_count.*invalid_ohlcv_rows"):
+                require_database_integrity(audit)
 
 
 if __name__ == "__main__":
