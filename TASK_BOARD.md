@@ -26,10 +26,18 @@
 | ANL-004 | done | Analysis Agent / `codex/spot-perp-analysis` | MGR-005, DATA-004 | 六組 runner、basis／trade-overlap／grouped reports | `4479cb9` → `5316c44`；六組與 grouped reports 完成 |
 | BENCH-004 | done | Manager / `codex/spot-vs-perp-2021-2026` | DATA-004, ANL-004 | 整合、完整測試、正式回測與因果判讀 | 78 tests；snapshot `d67917d4724ab20d`；六份 ledger 與 final balance 相符 |
 | MGR-006 | done | Manager / `codex/spot-vs-perp-2021-2026` | — | Hermes 協調入口、任務模板、四個專案 Agent 設定 | TOML／JSONL 解析與 diff-check 通過；未改交易行為 |
+| MGR-007 | in_progress | Manager / `codex/backtest-live-fidelity` | MGR-006 | 契約、狀態、ADR、整合 | rollback `b7cfc20`；固定 snapshot／成本／ownership；不覆寫報告 |
+| ENG-002 | in_progress | Engine / `codex/fidelity-engine` | MGR-007 | `strategy_engine.py`、`backtest_config.py`、`tests/core/**` | entry-relative 1m sequencing；MTM equity 事件；focused tests |
+| LIVE-003 | in_progress | Execution / `codex/fidelity-execution` | MGR-007 | `execution_engine.py`、`run_live_trading.py`、live execution tests | fill 後同輪保護或安全失敗；managed-only flat convergence；idempotent fill ledger |
+| DATA-005 | in_progress | Data / `codex/fidelity-data` | MGR-007 | downloader／DuckDB feed／`tests/data/**` | 純唯讀 audit；manifest SHA fail-fast；mark/funding schema（不下載） |
+| BENCH-005 | ready | Backtest / 待建立 | ENG-002, DATA-005 | comparison runner、analysis tests、獨立 fidelity reports | manifest／Parquet／MTM MDD；同快照 baseline/candidate；成本敏感度 |
+| AUD-001 | ready | Audit / 唯讀 | LIVE-003, BENCH-005 | 時序、資料、成本、live parity 稽核 | 無 Critical／High；ledger/equity/data identity 對帳 |
+| SHADOW-001 | blocked | Execution / testnet-shadow | LIVE-003, AUD-001 | testnet／paper 執行證據 | scripted lifecycle 通過；自然訊號觀察；需外部執行授權與時間 |
 
 ## Current blockers
 
 - 舊 `data/market_data.duckdb` 有 864,811 分鐘缺口且已停用；正式評估須使用新的標準合約資料路徑。
 - 實際帳戶 fee tier、歷史 funding 與 mark-price dataset 尚未提供；不偽造精準成本。
 - Live fill ledger 與 flat-position convergence 尚未完成，禁止直接宣稱 production-ready。
+- 歷史 funding／mark-price 尚未下載；DATA-005 僅建立 schema 與嚴格門檻，正式 fidelity run 前需另行取得資料。
 - NFE V2 A／BearS 與 `param-opt` 的未提交 worktree 全數保留且禁止修改。

@@ -2,14 +2,16 @@
 
 ## Objective
 
-以共同 1m 時間索引與相同執行假設，比較 Binance BTCUSDT 現貨／永續資料對 V2、V2A、BearS 回測期望的影響。
+建立可供策略調整與實盤對照的最小可信回測／執行契約：修正限價成交後時序、MTM 回撤、資料身分、實盤保護、flat 收斂與實際 fill ledger。
 
 ## Current phase
 
-Phase 7 完成：Spot／Perp 成對資料契約、六組比較、ledger 與交易重疊診斷已驗證；Hermes 最小協調介面已加入，未改動交易行為。
+Phase 8 進行中：`codex/backtest-live-fidelity` 從 checkpoint `b7cfc20` 啟動；先凍結 Engine／Execution／Data 契約，再平行實作，尚未執行 candidate 正式全期回測。
 
 ## Verified baseline
 
+- 本輪 rollback：`b7cfc20`；標準資料 SHA-256 `5b8e0da5a65338b5ca14ca6ee919331f82db4df4148edde44b4e046f433a5965`；期間 2021-01-01～2026-07-18 13:51 UTC。
+- 本輪固定設定：10,000 USD、risk-based 5%、20x 上限、maker 0.02%、taker 0.05%；baseline 使用既有 contract benchmark，不覆寫。
 - Hermes MVP：根目錄狀態檔維持唯一事實來源；新增 `coordination/` 相容入口、任務模板與 `strategy`／`data`／`backtest`／`audit` 專案 Agent 設定。
 - Rollback：`b6556aa`（`codex/v8-modularization`）；`main`／`v8.0.0` 仍為 `76f6ee4`。
 - Integration：`codex/contract-backtest-parity`，從 `b6556aa` 建立。
@@ -46,6 +48,10 @@ Phase 7 完成：Spot／Perp 成對資料契約、六組比較、ledger 與交�
 
 ## Active branches and worktrees
 
+- Manager/integration：`codex/backtest-live-fidelity`
+- Fidelity Engine：`codex/fidelity-engine`
+- Fidelity Execution：`codex/fidelity-execution`
+- Fidelity Data：`codex/fidelity-data`
 - Manager/integration：`codex/contract-backtest-parity`
 - Engine：`codex/v8-engine-core`
 - Data：`codex/v8-data-pipeline`
@@ -66,4 +72,4 @@ Phase 7 完成：Spot／Perp 成對資料契約、六組比較、ledger 與交�
 
 ## Next checkpoint
 
-使用者審視 Spot／Perp 因果結果後，再決定是否針對 V2A／BearS 進行新一輪單變因策略研究；本輪不改策略 defaults。
+整合 ENG-002、LIVE-003、DATA-005 的已驗證 commits；之後由 backtest Agent 補正式 manifest／Parquet／MTM 報告並執行同快照 baseline/candidate 對照。
