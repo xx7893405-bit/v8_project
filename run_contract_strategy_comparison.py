@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
-import shlex
+from secrets import token_hex
 import subprocess
-import sys
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from time import monotonic
 
 import duckdb
@@ -20,6 +21,16 @@ from ccxt_market_data import DuckDBMarketDataFeed, require_fidelity_data
 from download_perpetual_history import verify_manifest
 from multi_timeframe_backtest import MultiTimeframeBacktester
 from nfe_v2_strategy import NFEV2Strategy
+from run_artifacts import (
+    METRICS_SCHEMA_VERSION,
+    RUN_SCHEMA_VERSION,
+    canonical_artifact_references,
+    create_run_directory,
+    render_review_markdown,
+    render_summary_markdown,
+    validate_run_artifact,
+    validate_run_id,
+)
 
 
 MARKET = {"exchange": "binance", "market_type": "swap", "symbol": "BTC/USDT:USDT"}
@@ -133,6 +144,59 @@ def clip_period(
     return start, end
 
 
+def _utc_iso(value) -> str:
+    timestamp = pd.Timestamp(value)
+    timestamp = (
+        timestamp.tz_localize("UTC")
+        if timestamp.tzinfo is None
+        else timestamp.tz_convert("UTC")
+    )
+    return timestamp.isoformat()
+
+
+def _canonical_utc_timestamp(value, field: str) -> str:
+    try:
+        timestamp = pd.Timestamp(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"invalid {field}") from error
+    if pd.isna(timestamp):
+        raise ValueError(f"invalid {field}")
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.tz_localize("UTC")
+    else:
+        timestamp = timestamp.tz_convert("UTC")
+    return timestamp.isoformat()
+
+
+def _normalize_equity_row(row: dict) -> dict:
+    if "time" not in row:
+        raise ValueError("equity row missing time")
+    if "event_time" in row:
+        raise ValueError("equity row has conflicting time fields")
+    normalized = dict(row)
+    normalized["event_time"] = _canonical_utc_timestamp(
+        normalized.pop("time"), "equity time"
+    )
+    return normalized
+
+
+def _normalize_trade_row(row: dict) -> dict:
+    if "entry_time" not in row or "exit_time" not in row:
+        raise ValueError("trade row missing lifecycle timestamp")
+    if {"time", "event_time"} & row.keys():
+        raise ValueError("trade row has conflicting timestamp fields")
+    normalized = dict(row)
+    normalized["entry_time"] = _canonical_utc_timestamp(
+        normalized["entry_time"], "trade entry_time"
+    )
+    normalized["exit_time"] = _canonical_utc_timestamp(
+        normalized["exit_time"], "trade exit_time"
+    )
+    if pd.Timestamp(normalized["exit_time"]) < pd.Timestamp(normalized["entry_time"]):
+        raise ValueError("trade exit_time precedes entry_time")
+    return normalized
+
+
 def calculate_metrics(
     trades: list[dict], missed: int, initial_balance: float, equity_events: list[dict] | None = None
 ) -> dict:
@@ -235,9 +299,16 @@ def run_period(
         or abs(metrics["final_balance"] - session.balance) > 0.01
     ):
         raise RuntimeError(f"Ending equity mismatch for {spec['name']} {period_name}")
-    trades = [{"strategy": spec["name"], "period": period_name, **row} for row in json_ready(session.trades)]
+    trades = [
+        _normalize_trade_row(
+            {"strategy": spec["name"], "period": period_name, **row}
+        )
+        for row in json_ready(session.trades)
+    ]
     equity = [
-        {"strategy": spec["name"], "period": period_name, **row}
+        _normalize_equity_row(
+            {"strategy": spec["name"], "period": period_name, **row}
+        )
         for row in json_ready(session.equity_events)
     ]
     result = {
@@ -298,7 +369,8 @@ def validate_baseline(
     candidate_snapshot: dict,
     candidate_periods: dict[str, tuple[pd.Timestamp, pd.Timestamp]],
 ) -> tuple[dict, dict]:
-    baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    baseline_bytes = baseline_path.read_bytes()
+    baseline = json.loads(baseline_bytes)
     snapshot = baseline.get("snapshot")
     if not isinstance(snapshot, dict) or any(key not in snapshot for key in SNAPSHOT_IDENTITY_KEYS):
         raise RuntimeError("baseline identity is incomplete")
@@ -333,11 +405,16 @@ def validate_baseline(
                 mismatches.append(f"{row['strategy']}.{row['period']}.{key}")
     if mismatches:
         raise RuntimeError("baseline identity mismatch: " + ", ".join(sorted(set(mismatches))))
-    return baseline, {
-        "path": str(baseline_path.resolve()),
-        "generated_at": baseline.get("generated_at"),
-        "snapshot": snapshot,
+    baseline_run_id = baseline.get("run_id", baseline_path.parent.name)
+    validate_run_id(baseline_run_id)
+    identity = {
+        "run_id": baseline_run_id,
+        "content_sha256": hashlib.sha256(baseline_bytes).hexdigest(),
+        "snapshot_id": snapshot["fingerprint"],
     }
+    if baseline.get("generated_at") is not None:
+        identity["generated_at"] = baseline["generated_at"]
+    return baseline, identity
 
 
 def baseline_comparison(
@@ -360,7 +437,16 @@ def baseline_comparison(
             key: None if old.get(key) is None or new.get(key) is None else round(new[key] - old[key], 4)
             for key in metric_names
         }
-        comparisons.append({"strategy": result["strategy"], "period": result["period"], "metrics": new, "baseline_deltas": deltas})
+        comparisons.append(
+            {
+                "strategy": result["strategy"],
+                "period": result["period"],
+                "start": _utc_iso(result["start"]),
+                "end": _utc_iso(result["end"]),
+                "metrics": new,
+                "baseline_deltas": deltas,
+            }
+        )
     return identity, comparisons
 
 
@@ -379,37 +465,34 @@ def write_reports(
     manifest["baseline"] = baseline_identity
     manifest["warnings"] = warnings[:5]
     summary = {
+        "schema_version": RUN_SCHEMA_VERSION,
+        "metrics_version": METRICS_SCHEMA_VERSION,
+        "run_id": manifest["run_id"],
+        "created_at": manifest["created_at"],
+        "provenance": {
+            key: manifest[key]
+            for key in ("strategy", "data", "git", "period", "assumptions")
+        },
         "verdict": "research_only" if warnings else "fidelity_candidate",
         "profile": manifest["profile"],
         "results": comparisons,
         "warnings": warnings[:5],
         "baseline": baseline_identity,
-        "artifacts": {name: str((output_dir / name).resolve()) for name in (
-            "manifest.json", "summary.json", "report.md", "trades.parquet", "equity.parquet",
-            "diagnostics.parquet", "run.log"
-        )},
+        "artifacts": canonical_artifact_references(),
     }
+    manifest["artifacts"] = canonical_artifact_references()
+    validate_run_artifact(manifest, summary)
     (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, allow_nan=False), encoding="utf-8")
     (output_dir / "summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False), encoding="utf-8")
     write_parquet(all_trades, output_dir / "trades.parquet")
     write_parquet(all_equity, output_dir / "equity.parquet")
     write_parquet(diagnostics, output_dir / "diagnostics.parquet")
-    rows = [
-        f"| {row['strategy']} | {row['period']} | {row['metrics']['return_pct']} | "
-        f"{row['metrics']['max_drawdown_pct']} | {row['metrics']['trades']} | "
-        f"{row['metrics']['profit_factor']} |"
-        for row in comparisons
-    ]
-    report = (
-        "# Contract fidelity comparison\n\n"
-        f"Verdict: **{summary['verdict']}**.\n\n"
-        + "".join(f"Warning: {warning}\n\n" for warning in warnings)
-        + "| Strategy | Period | Return % | MDD % | Trades | Profit factor |\n"
-        + "| --- | --- | ---: | ---: | ---: | ---: |\n"
-        + "\n".join(rows)
-        + "\n"
+    summary_markdown = render_summary_markdown(summary)
+    (output_dir / "summary.md").write_text(summary_markdown, encoding="utf-8")
+    (output_dir / "review.md").write_text(
+        render_review_markdown(summary), encoding="utf-8"
     )
-    (output_dir / "report.md").write_text(report, encoding="utf-8")
+    (output_dir / "report.md").write_text(summary_markdown, encoding="utf-8")
     (output_dir / "run.log").write_text(
         "completed=true\n"
         f"profile={manifest['profile']}\n"
@@ -431,8 +514,48 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+@contextmanager
+def _publication_reservation(output_root: Path, run_id: str):
+    output_root.mkdir(parents=True, exist_ok=True)
+    output_dir = output_root / run_id
+    if output_dir.exists():
+        raise FileExistsError(output_dir)
+
+    reservation = output_root / f".{run_id}.reservation"
+    try:
+        reservation.mkdir()
+    except FileExistsError as error:
+        raise FileExistsError(output_dir) from error
+
+    token = token_hex(16)
+    owner = reservation / "owner"
+    owner_written = False
+    try:
+        owner.write_text(token, encoding="utf-8")
+        owner_written = True
+        if output_dir.exists():
+            raise FileExistsError(output_dir)
+        yield output_dir
+    finally:
+        try:
+            if owner_written and owner.read_text(encoding="utf-8") == token:
+                owner.unlink()
+                reservation.rmdir()
+            elif not owner_written:
+                owner.unlink(missing_ok=True)
+                reservation.rmdir()
+        except OSError:
+            pass
+
+
 def main() -> None:
     args = parse_args()
+    validate_run_id(args.run_id)
+    with _publication_reservation(args.output_root, args.run_id) as output_dir:
+        _run(args, output_dir)
+
+
+def _run(args: argparse.Namespace, output_dir: Path) -> None:
 
     verified = verify_manifest(args.database, args.manifest)
     identity = snapshot_identity(args.database)
@@ -449,11 +572,10 @@ def main() -> None:
     if not args.baseline.is_file():
         raise FileNotFoundError(f"Baseline report does not exist: {args.baseline}")
     baseline, baseline_identity = validate_baseline(args.baseline, identity, periods)
-    output_dir = args.output_root / args.run_id
-    output_dir.mkdir(parents=True, exist_ok=False)
 
     results, all_trades, all_equity, diagnostics = [], [], [], []
-    for spec in strategy_specs():
+    specs = strategy_specs()
+    for spec in specs:
         for period, (start, end) in periods.items():
             result, trades, equity, diagnostic = run_period(spec, period, start, end, args.database, identity)
             results.append(result)
@@ -461,37 +583,77 @@ def main() -> None:
             all_equity.extend(equity)
             diagnostics.append(diagnostic)
     assert_same_snapshot(identity, snapshot_identity(args.database))
+    git = git_identity()
+    configuration = [
+        {
+            "name": spec["name"],
+            "kwargs": {
+                key: _json_value(value) for key, value in spec["kwargs"].items()
+            },
+            "backtest_config": asdict(benchmark_config(spec["max_holding_bars"])),
+        }
+        for spec in specs
+    ]
+    config_id = "sha256:" + hashlib.sha256(
+        json.dumps(
+            configuration, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode()
+    ).hexdigest()
+    full_start, full_end = periods["full"]
     manifest = {
+        "schema_version": RUN_SCHEMA_VERSION,
+        "metrics_version": METRICS_SCHEMA_VERSION,
         "experiment_id": "BENCH-005",
         "run_id": args.run_id,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "git": git_identity(),
-        "command": shlex.join([sys.executable, *sys.argv]),
-        "working_directory": str(Path.cwd()),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "strategy": {
+            "name": "contract_strategy_comparison",
+            "config_id": config_id,
+        },
+        "data": {
+            "snapshot_id": identity["fingerprint"],
+            "content_sha256": verified["sha256"],
+            "market_type": MARKET["market_type"],
+            "symbol": MARKET["symbol"],
+        },
+        "git": {"revision": git["commit"]},
+        "period": {"start": _utc_iso(full_start), "end": _utc_iso(full_end)},
+        "assumptions": {
+            "costs": {
+                "maker_fee": 0.0002,
+                "taker_fee": 0.0005,
+                "funding_rate_8h": 0.0001,
+                "slippage_usd": 15.0,
+                "limit_order_slippage_usd": 5.0,
+                "stop_loss_slippage_usd": 10.0,
+            },
+            "leverage": {"risk_pct": RISK_PCT, "max_leverage": MAX_LEVERAGE},
+        },
+        "artifacts": canonical_artifact_references(),
         "profile": args.profile,
         "random_seed": None,
-        "data": {"database": str(args.database.resolve()), "manifest": str(args.manifest.resolve()), **verified, "snapshot": identity},
-        "market": {**MARKET, "interval": "1m"},
-        "periods": {name: {"start": str(bounds[0]), "end": str(bounds[1])} for name, bounds in periods.items()},
-        "costs_and_leverage": {
-            "maker_fee": 0.0002, "taker_fee": 0.0005, "funding_rate_8h": 0.0001,
-            "slippage_usd": 15.0, "limit_order_slippage_usd": 5.0,
-            "stop_loss_slippage_usd": 10.0, "risk_pct": RISK_PCT, "max_leverage": MAX_LEVERAGE,
-        },
+        "git_dirty": git["dirty"],
         "fidelity_coverage": fidelity_coverage,
-        "baseline": str(args.baseline.resolve()),
-        "warnings": [],
+        "configuration": configuration,
     }
-    write_reports(
-        results,
-        all_trades,
-        all_equity,
-        diagnostics,
-        manifest,
-        baseline,
-        baseline_identity,
-        output_dir,
-    )
+    args.output_root.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(
+        dir=args.output_root, prefix=f".{args.run_id}."
+    ) as staging_root:
+        staging_dir = create_run_directory(Path(staging_root) / args.run_id)
+        write_reports(
+            results,
+            all_trades,
+            all_equity,
+            diagnostics,
+            manifest,
+            baseline,
+            baseline_identity,
+            staging_dir,
+        )
+        if output_dir.exists():
+            raise FileExistsError(output_dir)
+        staging_dir.rename(output_dir)
     print(json.dumps({"status": "complete", "profile": args.profile, "summary": str(output_dir / "summary.json")}))
 
 

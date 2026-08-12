@@ -14,6 +14,7 @@ from strategy_base import BacktestStrategy
 from v8_strategy import V8FvgOverlapStrategy
 
 M1_WITH_CLOSE = [*M1_COLUMNS, "close"]
+BACKTEST_ENGINE_CONTRACT_ID = "backtest-engine/v1"
 
 
 @dataclass
@@ -25,6 +26,7 @@ class BacktestSessionResult:
     pending_retest_order: Optional[dict]
     pending_breakout_order: Optional[dict]
     equity_events: List[dict]
+    engine_contract_id: str = BACKTEST_ENGINE_CONTRACT_ID
 
 
 class V8OmniscientEye:

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Strategy Module Composer"
+  short_description: "Map strategy ideas to reusable V8 modules and gaps"
+  default_prompt: "Use $strategy-module-composer to map this strategy description to existing V8 modules and identify only true gaps."
