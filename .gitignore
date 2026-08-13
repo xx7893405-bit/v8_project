@@ -79,6 +79,8 @@ deploy/macos/ssh-key-*.key
 !/.agents/skills/factor-research-review/**
 !/.agents/skills/token-efficient-backtest-workflow/
 !/.agents/skills/token-efficient-backtest-workflow/**
+!/.agents/skills/strategy-chart-review/
+!/.agents/skills/strategy-chart-review/**
 /.worktrees/
 /data/backtests/
 /video_analysis_*/

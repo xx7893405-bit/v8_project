@@ -1,0 +1,4 @@
+interface:
+  display_name: "V8 策略圖形驗證"
+  short_description: "用代表性圖表驗證 V8 策略並建立安全可重用的回測索引"
+  default_prompt: "使用 $strategy-chart-review 對 V8 策略進行小樣本圖形驗證，或建立可追溯且無未來資訊的回測索引。"
