@@ -9,6 +9,11 @@ f_state(int state, int touched, int dir, int n, int window, bool eligible, bool 
     s
 
 var table result = table.new(position.top_right, 1, 2)
+var array<string> retainedTimes = array.new<string>()
+var array<string> retainedKinds = array.new<string>()
+var array<string> retainedSources = array.new<string>()
+var array<string> retainedZones = array.new<string>()
+var array<string> retainedReasons = array.new<string>()
 if barstate.islast
     int passed = 0
     // Touch candle is #1; candle #96 is the last eligible key candle.
@@ -77,5 +82,9 @@ if barstate.islast
     passed += f_assert(f_direction_allowed(false, true), "veto OFF permits setup after opposite FVG")
     passed += f_assert(not f_direction_allowed(true, true), "veto ON blocks new setup after opposite FVG")
     passed += f_assert(f_direction_allowed(true, false), "same-direction setup allowed before opposite FVG")
+    for eventNo = 0 to 10
+        string eventText = str.tostring(eventNo)
+        f_push_failure(retainedTimes, retainedKinds, retainedSources, retainedZones, retainedReasons, eventText, eventText, eventText, eventText, eventText)
+    passed += f_assert(array.size(retainedTimes) == 10 and array.get(retainedTimes, 0) == "1" and array.get(retainedTimes, 9) == "10" and array.size(retainedKinds) == 10 and array.size(retainedSources) == 10 and array.size(retainedZones) == 10 and array.size(retainedReasons) == 10, "failure audit keeps only latest ten synchronized entries")
     table.cell(result, 0, 0, "PASS: " + str.tostring(passed) + " cases", bgcolor=color.teal, text_color=color.white)
     table.cell(result, 0, 1, "Synthetic Pine contract checks", text_color=color.teal)

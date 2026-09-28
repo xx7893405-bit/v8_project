@@ -80,9 +80,23 @@ var array<int> ovId = array.new<int>()
 var array<int> ovRank = array.new<int>()
 var array<int> ovEligibleBar = array.new<int>()
 var array<int> ovHtfId = array.new<int>()
+var array<float> ovHtfTop = array.new<float>()
+var array<float> ovHtfBottom = array.new<float>()
 var array<int> ovLtfId = array.new<int>()
 var int nextOverlapId = 1
 bool ranksDirty = false
+
+var array<string> failureTimes = array.new<string>()
+var array<string> failureKinds = array.new<string>()
+var array<string> failureSources = array.new<string>()
+var array<string> failureZones = array.new<string>()
+var array<string> failureReasons = array.new<string>()
+var array<int> failureHtfIds = array.new<int>()
+var array<float> failureHtfBottoms = array.new<float>()
+var array<float> failureHtfTops = array.new<float>()
+var array<int> failureClosedAt = array.new<int>()
+var array<box> failureBoxes = array.new<box>()
+var table failureTable = table.new(position.top_right, 5, 11, bgcolor = color.new(color.black, 15), frame_color = color.gray, frame_width = 1, border_color = color.new(color.gray, 50), border_width = 1)
 
 // BEGIN CONTRACT FUNCTIONS
 f_gap(float hi, float lo, float oldHi, float oldLo) =>
@@ -135,7 +149,33 @@ f_can_pair(int n, int firstBar, int window) =>
 
 f_direction_allowed(bool veto, bool oppositeSeen) =>
     not veto or not oppositeSeen
+
+f_push_failure(array<string> timeRows, array<string> kindRows, array<string> sourceRows, array<string> zoneRows, array<string> reasonRows, string timeText, string kindText, string sourceText, string zoneText, string reasonText) =>
+    array.push(timeRows, timeText)
+    array.push(kindRows, kindText)
+    array.push(sourceRows, sourceText)
+    array.push(zoneRows, zoneText)
+    array.push(reasonRows, reasonText)
+    while array.size(timeRows) > 10
+        array.shift(timeRows)
+        array.shift(kindRows)
+        array.shift(sourceRows)
+        array.shift(zoneRows)
+        array.shift(reasonRows)
 // END CONTRACT FUNCTIONS
+
+// Keep geometry alongside the same rolling ten events, even after live sources retire.
+f_record_failure(string timeText, string kindText, string sourceText, string zoneText, string reasonText, int sourceId, float sourceBottom, float sourceTop, int closedAt) =>
+    f_push_failure(failureTimes, failureKinds, failureSources, failureZones, failureReasons, timeText, kindText, sourceText, zoneText, reasonText)
+    array.push(failureHtfIds, sourceId)
+    array.push(failureHtfBottoms, sourceBottom)
+    array.push(failureHtfTops, sourceTop)
+    array.push(failureClosedAt, closedAt)
+    while array.size(failureHtfIds) > 10
+        array.shift(failureHtfIds)
+        array.shift(failureHtfBottoms)
+        array.shift(failureHtfTops)
+        array.shift(failureClosedAt)
 
 f_prefix(int i) =>
     (array.get(ovDir, i) == 1 ? "多" : "空") + " Z" + str.tostring(array.get(ovId, i)) + " P" + str.tostring(array.get(ovRank, i))
@@ -168,6 +208,8 @@ f_trim_overlaps() =>
         array.shift(ovRank)
         array.shift(ovEligibleBar)
         array.shift(ovHtfId)
+        array.shift(ovHtfTop)
+        array.shift(ovHtfBottom)
         array.shift(ovLtfId)
 
 
@@ -274,6 +316,8 @@ if samples > 0
                                     array.push(ovRank, 1)
                                     array.push(ovEligibleBar, sampleIndex)
                                     array.push(ovHtfId, array.get(htfSourceId, hi))
+                                    array.push(ovHtfTop, array.get(htfTop, hi))
+                                    array.push(ovHtfBottom, array.get(htfBottom, hi))
                                     array.push(ovLtfId, array.get(ltfSourceId, li))
                                     array.set(htfUsed, hi, true)
                                     array.set(ltfUsed, li, true)
@@ -311,6 +355,8 @@ if samples > 0
                                     array.push(ovRank, 1)
                                     array.push(ovEligibleBar, sampleIndex)
                                     array.push(ovHtfId, array.get(htfSourceId, hi))
+                                    array.push(ovHtfTop, array.get(htfTop, hi))
+                                    array.push(ovHtfBottom, array.get(htfBottom, hi))
                                     array.push(ovLtfId, array.get(ltfSourceId, li))
                                     array.set(htfUsed, hi, true)
                                     array.set(ltfUsed, li, true)
@@ -366,6 +412,8 @@ if samples > 0
                                     array.push(ovRank, 1)
                                     array.push(ovEligibleBar, sampleIndex + 1)
                                     array.push(ovHtfId, array.get(htfSourceId, hi))
+                                    array.push(ovHtfTop, array.get(htfTop, hi))
+                                    array.push(ovHtfBottom, array.get(htfBottom, hi))
                                     array.push(ovLtfId, sampleCloseTime)
                                     array.set(htfUsed, hi, true)
                                     array.set(ltfUsed, array.size(ltfUsed) - 1, true)
@@ -407,6 +455,8 @@ if samples > 0
                                     array.push(ovRank, 1)
                                     array.push(ovEligibleBar, sampleIndex + 1)
                                     array.push(ovHtfId, array.get(htfSourceId, hi))
+                                    array.push(ovHtfTop, array.get(htfTop, hi))
+                                    array.push(ovHtfBottom, array.get(htfBottom, hi))
                                     array.push(ovLtfId, sampleCloseTime)
                                     array.set(htfUsed, hi, true)
                                     array.set(ltfUsed, array.size(ltfUsed) - 1, true)
@@ -491,6 +541,16 @@ if samples > 0
                                 box.set_bgcolor(b, state == 2 ? invalidColor : (state == 3 or state == 5) ? expiredColor : keyColor)
                             if state == 2
                                 invalidEvents += 1
+                                float overlapBottom = array.get(ovBottom, i)
+                                float overlapTop = array.get(ovTop, i)
+                                float sourceBottom = array.get(ovHtfBottom, i)
+                                float sourceTop = array.get(ovHtfTop, i)
+                                string eventTimeText = str.format_time(sampleCloseTime, "YYYY.MM.dd HH:mm", syminfo.timezone)
+                                string eventKind = d == 1 ? "多｜重疊區收盤失效" : "空｜重疊區收盤失效"
+                                string sourceText = "來源 1H FVG " + str.format_time(array.get(ovHtfId, i), "YYYY.MM.dd HH:mm", syminfo.timezone) + " [" + str.tostring(sourceBottom, format.mintick) + "–" + str.tostring(sourceTop, format.mintick) + "]"
+                                string overlapText = "重疊 Z" + str.tostring(array.get(ovId, i)) + " [" + str.tostring(overlapBottom, format.mintick) + "–" + str.tostring(overlapTop, format.mintick) + "]"
+                                string reasonText = d == 1 ? "收盤 " + str.tostring(sampleClose, format.mintick) + " < 下界 " + str.tostring(overlapBottom, format.mintick) : "收盤 " + str.tostring(sampleClose, format.mintick) + " > 上界 " + str.tostring(overlapTop, format.mintick)
+                                f_record_failure(eventTimeText, eventKind, sourceText, overlapText, reasonText, array.get(ovHtfId, i), sourceBottom, sourceTop, sampleCloseTime)
                             if state == 3 or state == 5
                                 expiredEvents += 1
                             if state == 4
@@ -545,6 +605,16 @@ if samples > 0
                         bool alive = true
                         if sampleConfirmed
                             bool invalid = d == 1 ? sampleClose < array.get(htfBottom, i) : sampleClose > array.get(htfTop, i)
+                            if invalid
+                                invalidEvents += 1
+                                float sourceBottom = array.get(htfBottom, i)
+                                float sourceTop = array.get(htfTop, i)
+                                string eventTimeText = str.format_time(sampleCloseTime, "YYYY.MM.dd HH:mm", syminfo.timezone)
+                                string eventKind = d == 1 ? "多｜1H FVG 本體收盤失效" : "空｜1H FVG 本體收盤失效"
+                                string sourceText = "1H FVG " + str.format_time(array.get(htfSourceId, i), "YYYY.MM.dd HH:mm", syminfo.timezone) + " [" + str.tostring(sourceBottom, format.mintick) + "–" + str.tostring(sourceTop, format.mintick) + "]"
+                                string zoneText = "1H FVG [" + str.tostring(sourceBottom, format.mintick) + "–" + str.tostring(sourceTop, format.mintick) + "]"
+                                string reasonText = d == 1 ? "收盤 " + str.tostring(sampleClose, format.mintick) + " < 下界 " + str.tostring(sourceBottom, format.mintick) : "收盤 " + str.tostring(sampleClose, format.mintick) + " > 上界 " + str.tostring(sourceTop, format.mintick)
+                                f_record_failure(eventTimeText, eventKind, sourceText, zoneText, reasonText, array.get(htfSourceId, i), sourceBottom, sourceTop, sampleCloseTime)
                             alive := not invalid and f_keep_source(array.get(htfUsed, i), hasSetup, sampleIndex, array.get(htfFirstBar, i), observationBars)
                             array.set(htfActive, i, alive)
                         box b = array.get(htfBoxes, i)
@@ -589,6 +659,45 @@ if samples > 0
                 closed15mCount += 1
                 intrabarHistoryStarted := true
 
+if barstate.islast
+    // Rebuild at most ten archived source boxes; repeated events share one rectangle.
+    // Right edge is the triggering 15m close, never extended into later candles.
+    while array.size(failureBoxes) > 0
+        box.delete(array.pop(failureBoxes))
+    array<int> drawnFailureSources = array.new<int>()
+    if array.size(failureHtfIds) > 0
+        for offset = 0 to array.size(failureHtfIds) - 1
+            int logIndex = array.size(failureHtfIds) - 1 - offset
+            int sourceId = array.get(failureHtfIds, logIndex)
+            if not array.includes(drawnFailureSources, sourceId)
+                int closedAt = array.get(failureClosedAt, logIndex)
+                string archiveText = array.get(failureKinds, logIndex) + "\n" + str.format_time(closedAt, "MM-dd HH:mm", syminfo.timezone) + " " + syminfo.timezone
+                box archived = box.new(left = sourceId, right = closedAt, xloc = xloc.bar_time,
+                    top = array.get(failureHtfTops, logIndex), bottom = array.get(failureHtfBottoms, logIndex), extend = extend.none,
+                    bgcolor = color.new(color.rgb(239, 83, 80), 88), border_color = color.new(color.red, 45), border_style = line.style_dashed,
+                    text = archiveText, text_color = color.new(color.red, 10), text_size = zoneTextSize, text_formatting = text.format_bold,
+                    text_halign = text.align_left, text_valign = text.align_top)
+                array.push(failureBoxes, archived)
+                array.push(drawnFailureSources, sourceId)
+    table.clear(failureTable, 0, 0, 4, 10)
+    table.cell(failureTable, 0, 0, "失效時間（商品時區）", text_color = color.white, bgcolor = color.new(color.blue, 45), text_size = size.small, text_formatting = text.format_bold)
+    table.cell(failureTable, 1, 0, "事件", text_color = color.white, bgcolor = color.new(color.blue, 45), text_size = size.small, text_formatting = text.format_bold)
+    table.cell(failureTable, 2, 0, "來源 1H FVG", text_color = color.white, bgcolor = color.new(color.blue, 45), text_size = size.small, text_formatting = text.format_bold)
+    table.cell(failureTable, 3, 0, "失效區", text_color = color.white, bgcolor = color.new(color.blue, 45), text_size = size.small, text_formatting = text.format_bold)
+    table.cell(failureTable, 4, 0, "15m 收盤核對", text_color = color.white, bgcolor = color.new(color.blue, 45), text_size = size.small, text_formatting = text.format_bold)
+    int failureCount = array.size(failureTimes)
+    if failureCount == 0
+        table.cell(failureTable, 0, 1, "目前載入區間尚無收盤失效", text_color = chart.fg_color, bgcolor = color.new(color.gray, 82), text_size = size.small)
+    else
+        for row = 0 to failureCount - 1
+            int logIndex = failureCount - 1 - row
+            color rowColor = row % 2 == 0 ? color.new(color.gray, 82) : color.new(color.gray, 89)
+            table.cell(failureTable, 0, row + 1, array.get(failureTimes, logIndex), text_color = chart.fg_color, bgcolor = rowColor, text_size = size.small)
+            table.cell(failureTable, 1, row + 1, array.get(failureKinds, logIndex), text_color = chart.fg_color, bgcolor = rowColor, text_size = size.small, text_formatting = text.format_bold)
+            table.cell(failureTable, 2, row + 1, array.get(failureSources, logIndex), text_color = chart.fg_color, bgcolor = rowColor, text_size = size.small)
+            table.cell(failureTable, 3, row + 1, array.get(failureZones, logIndex), text_color = chart.fg_color, bgcolor = rowColor, text_size = size.small)
+            table.cell(failureTable, 4, row + 1, array.get(failureReasons, logIndex), text_color = chart.fg_color, bgcolor = rowColor, text_size = size.small)
+
 // 15m details are never drawn on the 1H overview.
 plotshape(is15m and bullFormation, title = "15m 看漲 FVG 形成", style = shape.circle, location = location.belowbar, color = color.new(color.aqua, 30), size = size.tiny, display = display.pane)
 plotshape(is15m and bearFormation, title = "15m 看跌 FVG 形成", style = shape.circle, location = location.abovebar, color = color.new(color.orange, 30), size = size.tiny, display = display.pane)
@@ -598,6 +707,6 @@ plot(is15m ? (newConfirmedHtf ? htfTopNow : na) : na, "1H 新確認 FVG 上界",
 plot(is15m ? ((bullFormation or bearFormation) ? formedBottom : na) : na, "15m 新 FVG 下界", display=display.data_window)
 plot(is15m ? ((bullFormation or bearFormation) ? formedTop : na) : na, "15m 新 FVG 上界", display=display.data_window)
 plot(is15m ? (touchEvents) : na, "首次進區數", display=display.data_window)
-plot(is15m ? (invalidEvents) : na, "收盤失效數", display=display.data_window)
+plot(is15m ? (invalidEvents) : na, "收盤失效事件數（重疊區 + 1H FVG 本體）", display=display.data_window)
 plot(is15m ? (expiredEvents) : na, "等待／觀察過期數", display=display.data_window)
 plot(is15m ? (keyEvents) : na, "關鍵 K 數", display=display.data_window)
