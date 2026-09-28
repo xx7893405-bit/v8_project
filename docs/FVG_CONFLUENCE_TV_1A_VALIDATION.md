@@ -74,3 +74,21 @@ rtk git diff --check
 F+／F- 的固定字級 plotshape 文字改為可調 label，圓點形成記號保留；文字與事件共用 Pine 的 500 個標籤上限，較舊標籤可能被回收。未改 FVG、時序、排序、生命週期或關鍵 K 判定。
 
 Pine SHA-256：`f57b09ea39f3b23a74593f35e7fe9e96898e7dc07450071e0dbf31ce84cb40b2`。重新產生 fixture，SHA-256 仍為上述 `1c8d1877...960fda`，沿用已執行的 57 項契約證據，沒有宣稱本次重跑。`git diff --check` 通過。TradingView 已在使用者當前 `BITGET:ETHUSDT.P` 15m 圖表成功編譯、顯示 14／16 參數及粗體事件；未改商品或時間週期，未跑回測。
+
+## 1H 鎖定 FVG 總覽（2026-09-28 22:34）
+
+以 `8800313` 為 baseline，依使用者要求新增 1H 顯示模式。1H 只繪製仍有效、已鎖定的 1H FVG；15m 區域、重疊框、優先級、形成記號及事件標籤僅在 15m 顯示。繪圖座標改用實際時間，以保留小週期成立時刻。原有字級、粗體、參數預設及純函數契約不變。
+
+1H 透過 `request.security_lower_tf` 依序讀取該小時的 15m OHLC，交給與 15m 模式相同的狀態更新區塊。新小時先釋出上一根已確認 1H，該步不推進 15m 計數。只處理已到收盤時間的 intrabar；未結束小時每次更新由 Pine rollback 重算已確認 15m 序列，不使用 varip 累加。依據官方 [lower-timeframe arrays](https://www.tradingview.com/pine-script-docs/concepts/other-timeframes-and-data/) 的時間排序與資料覆蓋說明。
+
+1H 總覽讀取最近最多 2,000 根 15m，超過目前參數最大壽命 `3 × 384` 加暖機；這是目前有效區域的總覽，並非所有歷史時點回放。資料供應商修訂、缺少 intrabar 的範圍、完整即時 rollback 與跨週期逐棒 parity 未由本次有限畫面核對證明。
+
+驗證：
+
+- 完整最終版 Pine v6 在 TradingView 成功編譯及 Update on chart；沒有編譯或執行錯誤。
+- 在使用者原有 `BITGET:ETHUSDT.P`，15m 與 1H 圖面均顯示當時兩個同位置的已鎖定看漲 1H FVG。1H 上沒有 15m FVG、重疊框、P、F+/F− 或事件標籤；返回 15m 時可見等待區、首次進區及失效的粗體標示。圖面比對未獨立重算市場 OHLC。
+- 最終移除形成圓點在狀態列的 0.00 數值；編譯器中的完整內容複製回讀，CRLF 正規化後與傳入本機最終版完全相同（36,488 字元）。
+- 重新產生 57 項 fixture，SHA-256 仍為 `1c8d1877ec09b2f53bf6c43eb3c07e220ded893d24a6da867f687c1400960fda`；沿用先前原生 Pine PASS 證據，未聲稱重跑，也不把純函數測試當成新跨週期接線的完整測試。
+- `git diff --check` 通過；未跑正式回測，未改 V2／SMC-V2，未推送或發布腳本。
+
+最終 Pine SHA-256：`d609162f18d3b86072207d21114433c00247420558cf321c4011ddbf51b07d2f`。已在原商品切換 1H／15m 核對；指標仍為此圖表的編輯器草稿實例，使用者可自行切換檢視。
