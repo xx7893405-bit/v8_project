@@ -19,6 +19,8 @@ bool oppositeVeto = input.bool(true, "暫定：1H FVG 後出現反向 15m FVG，
 int maxHtfZones = input.int(24, "最多保留 1H FVG", minval = 4, maxval = 80, group = "顯示")
 int maxLtfZones = input.int(48, "最多保留 15m FVG", minval = 8, maxval = 160, group = "顯示")
 int maxOverlapZones = input.int(80, "最多保留重疊區", minval = 8, maxval = 200, group = "顯示")
+int zoneTextSize = input.int(14, "區域文字大小", minval = 10, maxval = 32, group = "顯示")
+int eventTextSize = input.int(16, "訊號文字大小（粗體）", minval = 10, maxval = 36, group = "顯示")
 
 float displacementThreshold = displacementChoice == "30%" ? 0.30 : displacementChoice == "50%" ? 0.50 : 0.70
 float wickThreshold = wickChoice == "10%" ? 0.10 : wickChoice == "20%" ? 0.20 : 0.30
@@ -202,7 +204,7 @@ bool newConfirmedHtf = not na(htfClosedTime) and not na(htfTimeChange) and htfTi
 
 if newConfirmedHtf
     if htfBull
-        box b = box.new(left = bar_index, top = htfBullTop, right = bar_index + 1, bottom = htfBullBottom, extend = extend.right, bgcolor = htfBullColor, border_color = color.new(color.teal, 25), text = "1H 看漲 FVG", text_color = chart.fg_color, text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top)
+        box b = box.new(left = bar_index, top = htfBullTop, right = bar_index + 1, bottom = htfBullBottom, extend = extend.right, bgcolor = htfBullColor, border_color = color.new(color.teal, 25), text = "1H 看漲 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top)
         array.push(htfTop, htfBullTop)
         array.push(htfBottom, htfBullBottom)
         array.push(htfDir, 1)
@@ -219,7 +221,7 @@ if newConfirmedHtf
                 if array.get(ltfActive, li) and array.get(ltfDir, li) == 1 and f_can_pair(bar_index, array.get(ltfFirstBar, li), observationBars)
                     [hasOverlap, oBottom, oTop] = f_overlap(array.get(htfBottom, hi), array.get(htfTop, hi), array.get(ltfBottom, li), array.get(ltfTop, li))
                     if hasOverlap
-                        box ob = box.new(left = bar_index, top = oTop, right = bar_index + 1, bottom = oBottom, extend = extend.right, bgcolor = overlapBullColor, border_color = color.new(color.lime, 10), border_width = 2, text = "多｜重度流動性", text_color = chart.fg_color, text_size = size.tiny, text_halign = text.align_right, text_valign = text.align_top)
+                        box ob = box.new(left = bar_index, top = oTop, right = bar_index + 1, bottom = oBottom, extend = extend.right, bgcolor = overlapBullColor, border_color = color.new(color.lime, 10), border_width = 2, text = "多｜重度流動性", text_color = chart.fg_color, text_size = zoneTextSize, text_formatting = text.format_bold, text_halign = text.align_right, text_valign = text.align_top)
                         array.push(ovTop, oTop)
                         array.push(ovBottom, oBottom)
                         array.push(ovDir, 1)
@@ -239,7 +241,7 @@ if newConfirmedHtf
                         f_trim_overlaps()
 
     if htfBear
-        box b = box.new(left = bar_index, top = htfBearTop, right = bar_index + 1, bottom = htfBearBottom, extend = extend.right, bgcolor = htfBearColor, border_color = color.new(color.red, 25), text = "1H 看跌 FVG", text_color = chart.fg_color, text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top)
+        box b = box.new(left = bar_index, top = htfBearTop, right = bar_index + 1, bottom = htfBearBottom, extend = extend.right, bgcolor = htfBearColor, border_color = color.new(color.red, 25), text = "1H 看跌 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top)
         array.push(htfTop, htfBearTop)
         array.push(htfBottom, htfBearBottom)
         array.push(htfDir, -1)
@@ -256,7 +258,7 @@ if newConfirmedHtf
                 if array.get(ltfActive, li) and array.get(ltfDir, li) == -1 and f_can_pair(bar_index, array.get(ltfFirstBar, li), observationBars)
                     [hasOverlap, oBottom, oTop] = f_overlap(array.get(htfBottom, hi), array.get(htfTop, hi), array.get(ltfBottom, li), array.get(ltfTop, li))
                     if hasOverlap
-                        box ob = box.new(left = bar_index, top = oTop, right = bar_index + 1, bottom = oBottom, extend = extend.right, bgcolor = overlapBearColor, border_color = color.new(color.fuchsia, 10), border_width = 2, text = "空｜重度流動性", text_color = chart.fg_color, text_size = size.tiny, text_halign = text.align_right, text_valign = text.align_top)
+                        box ob = box.new(left = bar_index, top = oTop, right = bar_index + 1, bottom = oBottom, extend = extend.right, bgcolor = overlapBearColor, border_color = color.new(color.fuchsia, 10), border_width = 2, text = "空｜重度流動性", text_color = chart.fg_color, text_size = zoneTextSize, text_formatting = text.format_bold, text_halign = text.align_right, text_valign = text.align_top)
                         array.push(ovTop, oTop)
                         array.push(ovBottom, oBottom)
                         array.push(ovDir, -1)
@@ -287,7 +289,7 @@ bool newLtfBear = barstate.isconfirmed and ltfDirection == -1
 if newLtfBull
     float zTop = ltfTopNow
     float zBottom = ltfBottomNow
-    box b = box.new(left = bar_index, top = zTop, right = bar_index + 1, bottom = zBottom, extend = extend.right, bgcolor = ltfBullColor, border_color = color.new(color.aqua, 45), text = "15m 多 FVG", text_color = chart.fg_color, text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top)
+    box b = box.new(left = bar_index, top = zTop, right = bar_index + 1, bottom = zBottom, extend = extend.right, bgcolor = ltfBullColor, border_color = color.new(color.aqua, 45), text = "15m 多 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top)
     array.push(ltfTop, zTop)
     array.push(ltfBottom, zBottom)
     array.push(ltfDir, 1)
@@ -306,7 +308,7 @@ if newLtfBull
                     bool blocked = not f_direction_allowed(oppositeVeto, array.get(htfOppositeSeen, hi))
                     [hasOverlap, oBottom, oTop] = f_overlap(array.get(htfBottom, hi), array.get(htfTop, hi), zBottom, zTop)
                     if not blocked and hasOverlap
-                        box ob = box.new(left = bar_index, top = oTop, right = bar_index + 1, bottom = oBottom, extend = extend.right, bgcolor = overlapBullColor, border_color = color.new(color.lime, 10), border_width = 2, text = "多｜重度流動性", text_color = chart.fg_color, text_size = size.tiny, text_halign = text.align_right, text_valign = text.align_top)
+                        box ob = box.new(left = bar_index, top = oTop, right = bar_index + 1, bottom = oBottom, extend = extend.right, bgcolor = overlapBullColor, border_color = color.new(color.lime, 10), border_width = 2, text = "多｜重度流動性", text_color = chart.fg_color, text_size = zoneTextSize, text_formatting = text.format_bold, text_halign = text.align_right, text_valign = text.align_top)
                         array.push(ovTop, oTop)
                         array.push(ovBottom, oBottom)
                         array.push(ovDir, 1)
@@ -328,7 +330,7 @@ if newLtfBull
 if newLtfBear
     float zTop = ltfTopNow
     float zBottom = ltfBottomNow
-    box b = box.new(left = bar_index, top = zTop, right = bar_index + 1, bottom = zBottom, extend = extend.right, bgcolor = ltfBearColor, border_color = color.new(color.orange, 45), text = "15m 空 FVG", text_color = chart.fg_color, text_size = size.tiny, text_halign = text.align_left, text_valign = text.align_top)
+    box b = box.new(left = bar_index, top = zTop, right = bar_index + 1, bottom = zBottom, extend = extend.right, bgcolor = ltfBearColor, border_color = color.new(color.orange, 45), text = "15m 空 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top)
     array.push(ltfTop, zTop)
     array.push(ltfBottom, zBottom)
     array.push(ltfDir, -1)
@@ -347,7 +349,7 @@ if newLtfBear
                     bool blocked = not f_direction_allowed(oppositeVeto, array.get(htfOppositeSeen, hi))
                     [hasOverlap, oBottom, oTop] = f_overlap(array.get(htfBottom, hi), array.get(htfTop, hi), zBottom, zTop)
                     if not blocked and hasOverlap
-                        box ob = box.new(left = bar_index, top = oTop, right = bar_index + 1, bottom = oBottom, extend = extend.right, bgcolor = overlapBearColor, border_color = color.new(color.fuchsia, 10), border_width = 2, text = "空｜重度流動性", text_color = chart.fg_color, text_size = size.tiny, text_halign = text.align_right, text_valign = text.align_top)
+                        box ob = box.new(left = bar_index, top = oTop, right = bar_index + 1, bottom = oBottom, extend = extend.right, bgcolor = overlapBearColor, border_color = color.new(color.fuchsia, 10), border_width = 2, text = "空｜重度流動性", text_color = chart.fg_color, text_size = zoneTextSize, text_formatting = text.format_bold, text_halign = text.align_right, text_valign = text.align_top)
                         array.push(ovTop, oTop)
                         array.push(ovBottom, oBottom)
                         array.push(ovDir, -1)
@@ -474,9 +476,9 @@ if array.size(ovTop) > 0
 // Preserve first touch even if that same eligible candle also becomes the key.
 // One label per direction/candle avoids stacking several labels at the same price.
 if bullEvents != ""
-    label.new(bar_index, low, bullEvents, style=label.style_label_up, color=bullKey ? color.yellow : color.new(color.aqua, 15), textcolor=color.black, size=size.tiny, textalign=text.align_left)
+    label.new(bar_index, low, bullEvents, style=label.style_label_up, color=bullKey ? color.yellow : color.new(color.aqua, 15), textcolor=color.black, size=eventTextSize, text_formatting=text.format_bold, textalign=text.align_left)
 if bearEvents != ""
-    label.new(bar_index, high, bearEvents, style=label.style_label_down, color=bearKey ? color.yellow : color.new(color.orange, 15), textcolor=color.black, size=size.tiny, textalign=text.align_left)
+    label.new(bar_index, high, bearEvents, style=label.style_label_down, color=bearKey ? color.yellow : color.new(color.orange, 15), textcolor=color.black, size=eventTextSize, text_formatting=text.format_bold, textalign=text.align_left)
 
 // Only a confirmed source with an active child setup is a locked HTF FVG.
 // A shared source remains visible while ANY child setup is still waiting/observing.
@@ -527,8 +529,13 @@ if array.size(ltfTop) > 0
 // 圖上提示。
 //------------------------------------------------------------------------------
 
-plotshape(newLtfBull, title = "15m 看漲 FVG 形成", style = shape.circle, location = location.belowbar, color = color.new(color.aqua, 30), size = size.tiny, text = "F+")
-plotshape(newLtfBear, title = "15m 看跌 FVG 形成", style = shape.circle, location = location.abovebar, color = color.new(color.orange, 30), size = size.tiny, text = "F-")
+plotshape(newLtfBull, title = "15m 看漲 FVG 形成", style = shape.circle, location = location.belowbar, color = color.new(color.aqua, 30), size = size.tiny)
+plotshape(newLtfBear, title = "15m 看跌 FVG 形成", style = shape.circle, location = location.abovebar, color = color.new(color.orange, 30), size = size.tiny)
+// plotshape text has a fixed font size; labels keep F+/F- readable with the zone font.
+if newLtfBull
+    label.new(bar_index, low, "F+", yloc=yloc.belowbar, style=label.style_none, textcolor=color.aqua, size=zoneTextSize)
+if newLtfBear
+    label.new(bar_index, high, "F-", yloc=yloc.abovebar, style=label.style_none, textcolor=color.orange, size=zoneTextSize)
 
 // Reconciliation fields: visible in Data Window; they do not affect price scaling.
 plot(newConfirmedHtf ? htfBottomNow : na, "1H 新確認 FVG 下界", display=display.data_window)

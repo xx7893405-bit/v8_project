@@ -66,3 +66,11 @@ rtk git diff --check
 - 真實市場 96 根到期、影線刺穿後收回、多空案例需人工逐根再核對；合成斷言通過不等同已逐根驗收所有圖表樣本。
 
 本次只交付視覺驗證，不提供績效、交易勝率或 Pine/V8 parity 結論。執行時間、token、cache hits、費用：未取得可靠整段實測值，`unavailable`。
+
+## 字體調整（2026-09-28 22:17）
+
+以 `8222d99` 為 baseline，依使用者要求放大文字及加粗訊號。區域／F+／F- 字體預設 14；首次進區、關鍵 K、收盤失效、等待／觀察過期事件預設 16 並使用真正粗體；P 等級與區域狀態也加粗。Inputs「顯示」可分別調整兩種字級。使用 Pine v6 的 `text_formatting = text.format_bold`，依據官方 [Text and shapes](https://www.tradingview.com/pine-script-docs/visuals/text-and-shapes/)。此指標仍無實際交易進出場或下單規則。
+
+F+／F- 的固定字級 plotshape 文字改為可調 label，圓點形成記號保留；文字與事件共用 Pine 的 500 個標籤上限，較舊標籤可能被回收。未改 FVG、時序、排序、生命週期或關鍵 K 判定。
+
+Pine SHA-256：`f57b09ea39f3b23a74593f35e7fe9e96898e7dc07450071e0dbf31ce84cb40b2`。重新產生 fixture，SHA-256 仍為上述 `1c8d1877...960fda`，沿用已執行的 57 項契約證據，沒有宣稱本次重跑。`git diff --check` 通過。TradingView 已在使用者當前 `BITGET:ETHUSDT.P` 15m 圖表成功編譯、顯示 14／16 參數及粗體事件；未改商品或時間週期，未跑回測。
