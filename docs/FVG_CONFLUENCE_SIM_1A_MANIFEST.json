@@ -1,0 +1,75 @@
+{
+  "baseline_commit": "6ec5ac9",
+  "branch": "codex/fvg-confluence-tv-sim",
+  "spec_issue": 200,
+  "implementation_issue": 201,
+  "visual_sha256": "8f8f47efd14aa51f85d673a9c5a8c6a207303172f82b30ddb283346c0b9c7411",
+  "strategy_sha256": "e2d395b313399fa6df6d81b1c9180f64a3bd345b12cad2acb796da008ae972e8",
+  "contract_fixture_sha256": "4f0e08a39f850cfb97ad07f51366605dd23534dd54745b170df6a0a9b1afff83",
+  "contract_assertions_executed": 14,
+  "native_timing_fixture_sha256": "761f0881c6496a879ec8cd15523576a20533067ee7ecea4850ace32f90d307ae",
+  "native_timing_entries": 2,
+  "native_timing_exits": 2,
+  "chart_symbol": "BINANCE:BTCUSDT",
+  "market": "spot",
+  "chart_timezone": "UTC+8",
+  "timeframes_checked": [
+    "15m",
+    "1H"
+  ],
+  "validation_date": "2026-09-29",
+  "formal_v8_backtest": "not run; out of scope",
+  "live_orders": "none",
+  "initial_capital": 100000,
+  "default_quantity_base_units": 0.001,
+  "commission_percent": 0,
+  "slippage_ticks": 0,
+  "process_orders_on_close": false,
+  "calc_on_order_fills": true,
+  "calc_on_every_tick": false,
+  "source_entry_limit": 1,
+  "concurrent_positions": 1,
+  "buffer_percent_default": 1,
+  "target_rr_default": 2,
+  "observed_trades": [
+    {
+      "number": 22,
+      "side": "short",
+      "entry_local": "2026-09-28 22:45",
+      "entry_price": "82948.33",
+      "source_bottom": "83782.07",
+      "source_top": "84140.00",
+      "SL": "84143.58",
+      "TP": "80557.83",
+      "exit_local": "2026-09-29 00:15",
+      "exit_price": "84143.58",
+      "exit_reason": "SL"
+    },
+    {
+      "number": 21,
+      "side": "short",
+      "entry_local": "2026-09-24 22:45",
+      "entry_price": "84413.66",
+      "exit_local": "2026-09-28 17:00",
+      "exit_price": "82655.10",
+      "exit_reason": "TP"
+    },
+    {
+      "number": 23,
+      "side": "short",
+      "entry_local": "2026-09-29 05:30",
+      "entry_price": "83468.32",
+      "SL": "83801.87",
+      "TP": "82801.22",
+      "exit_reason": "open at observation"
+    }
+  ],
+  "limits": [
+    "Native OHLC broker path; no Bar Magnifier assertion",
+    "No formal performance or V8 fill parity claim",
+    "Live rollback not validated over a prolonged forward session"
+  ],
+  "runtime_seconds": "unavailable",
+  "token_usage": "unavailable",
+  "cost": "unavailable"
+}

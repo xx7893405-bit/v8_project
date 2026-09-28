@@ -1,0 +1,41 @@
+// Two bounded synthetic orders exercise the native broker emulator, not FVG performance.
+varip int processed = 0
+varip int fills = 0
+varip int exits = 0
+varip float previous = 0
+varip int previousClosed = 0
+varip int entryBar = na
+if runSignalEngine
+    processed += 1
+    if processed != bar_index + 1
+        runtime.error("SIGNAL ENGINE REPEATED ON FILL at bar " + str.tostring(bar_index))
+    if bar_index == 50 or bar_index == 60
+        strategy.entry("TEST", bar_index == 50 ? strategy.long : strategy.short)
+if strategy.position_size != 0 and previous == 0
+    fills += 1
+    entryBar := strategy.opentrades.entry_bar_index(0)
+    int expectedBar = fills == 1 ? 51 : 61
+    if entryBar != expectedBar or math.abs(strategy.position_avg_price - open) > syminfo.mintick / 2
+        runtime.error("Market entry must fill at next bar open")
+    int d = strategy.position_size > 0 ? 1 : -1
+    float stop = strategy.position_avg_price - d * syminfo.mintick
+    float target = f_sim_target(d, strategy.position_avg_price, stop, 2, syminfo.mintick)
+    strategy.exit("BRACKET", "TEST", stop=stop, limit=target, comment_loss="SL", comment_profit="TP")
+if strategy.closedtrades > previousClosed
+    exits += 1
+    int last = strategy.closedtrades - 1
+    if strategy.closedtrades.exit_bar_index(last) != entryBar
+        runtime.error("Immediate bracket must protect entry bar in this BTC fixture")
+    string reason = strategy.closedtrades.exit_comment(last)
+    if reason != "SL" and reason != "TP"
+        runtime.error("Exit reason must come from native bracket")
+previous := strategy.position_size
+previousClosed := strategy.closedtrades
+if runSignalEngine and bar_index == 65 and (fills != 2 or exits != 2)
+    runtime.error("Expected two protected trades")
+var table result = table.new(position.middle_center, 1, 1)
+if barstate.islast
+    table.cell(result, 0, 0, "TIMING PASS | fills " + str.tostring(fills) + " exits " + str.tostring(exits), bgcolor=color.green, text_color=color.white)
+plot(fills, "Test entries", display=display.status_line + display.data_window)
+plot(exits, "Test exits", display=display.status_line + display.data_window)
+plot(processed, "Signal close passes", display=display.data_window)

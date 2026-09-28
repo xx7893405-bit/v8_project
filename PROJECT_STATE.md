@@ -1,5 +1,9 @@
 # Project State
 
+## 此 checkout 的 FVG 模擬版里程碑（2026-09-29）
+
+`codex/fvg-confluence-tv-sim` 從 `6ec5ac9` 新增独立原生模擬策略，規格 #200／實作 #201；每個來源一次、全策略單筆，SL 邊界緩衝與實際成交價 2R。14 項原生契約與兩筆成交時序測試通過，BTCUSDT 15m 的 SL／TP 標記及 1H 模式已看圖核對。原視覺指標 SHA 不變；證據、限制與回復基準見 `docs/FVG_CONFLUENCE_SIM_1A.md`。不代表全專案回測或實盤驗收。
+
 ## 此 checkout 的 FVG 視覺驗證里程碑（2026-09-28）
 
 `codex/fvg-confluence-tv-1a` 以 `f41a2df` 為 baseline，完成 Issue #199 的 Pine 編譯／生命週期修正、57 項原生契約斷言與 BTCUSDT 15m 載入。下一步為使用者核對人工 FVG 畫法、首次 touch 時序及 P1 排序口徑；完整證據與限制見 `docs/FVG_CONFLUENCE_TV_1A_VALIDATION.md`。未執行正式回測、未修改原本 V2/SMC-V2。以下保留既有歷史狀態，不代表本次全專案重新稽核。

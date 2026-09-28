@@ -4,6 +4,7 @@
 
 | ID | Status | Owner / worktree | Depends on | Ownership | Acceptance |
 |---|---|---|---|---|---|
+| FVG-SIM-201 | done | Codex / `codex/fvg-confluence-tv-sim` | Issue #200, #201; approved 2026-09-29 | New FVG strategy, native Pine tests, task docs; preserve visual baseline 6ec5ac9 | This row's commit; native compile + 14 contracts + 2 timing trades, BTCUSDT SL/TP + 1H UI verified; see docs/FVG_CONFLUENCE_SIM_1A.md; no formal V8 backtest |
 | FVG-TV-199 | done | Codex / `codex/fvg-confluence-tv-1a` | Issue #199、2026-09-28 使用者生命週期補充 | 獨立 Pine、其規格及原生 Pine 測試；不修改 V2/SMC-V2 | 本列所在提交；TV v6 編譯、BTCUSDT 15m UI、57 項契約斷言；人工語義待核對，見 `docs/FVG_CONFLUENCE_TV_1A_VALIDATION.md` |
 | MGR-001 | done | Manager / `codex/contract-backtest-parity` | — | 契約、狀態、ADR、整合 | rollback `b6556aa`；canonical 合約基準已記錄 |
 | ENG-001 | done | Engine / `codex/v8-engine-core` | MGR-001 | `strategy_engine.py`、`backtest_config.py`、`tests/core/**` | `8b6904a` + `8819deb`；15 core tests |

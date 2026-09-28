@@ -1,0 +1,25 @@
+f_assert(bool condition, string description) =>
+    if not condition
+        runtime.error(description)
+    1
+var int passed = 0
+if barstate.isfirst
+    passed += f_assert(math.abs(f_sim_stop(1, 100, 200, 5, 0.01) - 95) < 0.000001, "long stop outside far edge")
+    passed += f_assert(math.abs(f_sim_stop(-1, 100, 200, 5, 0.01) - 205) < 0.000001, "short far-edge stop")
+    passed += f_assert(math.abs(f_sim_stop(1, 100, 103, 1, 0.1) - 99.9) < 0.000001, "long tick outward")
+    passed += f_assert(math.abs(f_sim_stop(-1, 100, 103, 1, 0.1) - 103.1) < 0.000001, "short tick outward")
+    passed += f_assert(math.abs(f_sim_target(1, 110, 97.5, 2, 0.01) - 135) < 0.000001, "2R from actual fill")
+    passed += f_assert(math.abs(f_sim_target(-1, 190, 202.5, 2, 0.01) - 165) < 0.000001, "short 2R")
+    passed += f_assert(na(f_sim_target(1, 95, 97.5, 2, 0.01)), "gap across long stop has no target")
+    passed += f_assert(na(f_sim_target(-1, 205, 202.5, 2, 0.01)), "gap across short stop has no target")
+    passed += f_assert(na(f_sim_target(1, 100, 100, 2, 0.01)), "zero risk has no target")
+    array<int> used = array.from(42)
+    passed += f_assert(not f_sim_can_enter(42, used, 0, false), "same FVG cannot reenter after exit")
+    passed += f_assert(f_sim_can_enter(43, used, 0, false), "unused source allowed while flat")
+    passed += f_assert(not f_sim_can_enter(43, used, 1, false), "long blocks different source")
+    passed += f_assert(not f_sim_can_enter(43, used, -1, false), "short blocks reversal")
+    passed += f_assert(not f_sim_can_enter(43, used, 0, true), "pending market order occupies slot")
+var table result = table.new(position.middle_center, 1, 1)
+if barstate.islast
+    table.cell(result, 0, 0, "SIM CONTRACT PASS " + str.tostring(passed), bgcolor=color.green, text_color=color.white)
+plot(passed, "Native assertions passed", display=display.data_window + display.status_line)
