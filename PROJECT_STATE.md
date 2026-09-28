@@ -1,5 +1,9 @@
 # Project State
 
+## 此 checkout 的 FVG 視覺驗證里程碑（2026-09-28）
+
+`codex/fvg-confluence-tv-1a` 以 `f41a2df` 為 baseline，完成 Issue #199 的 Pine 編譯／生命週期修正、57 項原生契約斷言與 BTCUSDT 15m 載入。下一步為使用者核對人工 FVG 畫法、首次 touch 時序及 P1 排序口徑；完整證據與限制見 `docs/FVG_CONFLUENCE_TV_1A_VALIDATION.md`。未執行正式回測、未修改原本 V2/SMC-V2。以下保留既有歷史狀態，不代表本次全專案重新稽核。
+
 ## Objective
 
 建立可供策略調整與實盤對照的最小可信回測／執行契約：修正限價成交後時序、MTM 回撤、資料身分、實盤保護、flat 收斂與實際 fill ledger。
