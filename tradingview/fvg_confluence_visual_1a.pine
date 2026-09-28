@@ -509,6 +509,7 @@ if samples > 0
             string bearEvents = ""
             bool bullKey = false
             bool bearKey = false
+            array<int> keyCompletedHtfIds = array.new<int>()
 
             if sampleConfirmed and array.size(ovTop) > 0
                 for i = 0 to array.size(ovTop) - 1
@@ -554,6 +555,7 @@ if samples > 0
                             if state == 3 or state == 5
                                 expiredEvents += 1
                             if state == 4
+                                array.push(keyCompletedHtfIds, array.get(ovHtfId, i))
                                 keyEvents += 1
                                 bullKey := bullKey or d == 1
                                 bearKey := bearKey or d == -1
@@ -603,6 +605,7 @@ if samples > 0
                         bool hasSetup = array.includes(liveHtfIds, array.get(htfSourceId, i))
                         int d = array.get(htfDir, i)
                         bool alive = true
+                        bool keyFinished = false
                         if sampleConfirmed
                             bool invalid = d == 1 ? sampleClose < array.get(htfBottom, i) : sampleClose > array.get(htfTop, i)
                             if invalid
@@ -617,16 +620,20 @@ if samples > 0
                                 f_record_failure(eventTimeText, eventKind, sourceText, zoneText, reasonText, array.get(htfSourceId, i), sourceBottom, sourceTop, sampleCloseTime)
                             alive := not invalid and f_keep_source(array.get(htfUsed, i), hasSetup, sampleIndex, array.get(htfFirstBar, i), observationBars)
                             array.set(htfActive, i, alive)
+                            // Keep the full source as a finite historical drawing when its last child completes.
+                            // This does not reactivate the source or change any signal/lifetime rule.
+                            keyFinished := not invalid and not alive and array.includes(keyCompletedHtfIds, array.get(htfSourceId, i))
                         box b = array.get(htfBoxes, i)
-                        bool show = alive and hasSetup
+                        bool show = (alive and hasSetup) or keyFinished
                         if not na(b)
                             box.set_bgcolor(b, show ? (d == 1 ? htfBullColor : htfBearColor) : color.new(color.gray, 100))
                             box.set_border_color(b, show ? color.new(d == 1 ? color.teal : color.red, 25) : color.new(color.gray, 100))
-                            box.set_text(b, show ? (d == 1 ? "1H 看漲 FVG｜已鎖定" : "1H 看跌 FVG｜已鎖定") : "")
+                            string sourceTitle = d == 1 ? "1H 看漲 FVG" : "1H 看跌 FVG"
+                            box.set_text(b, show ? sourceTitle + (keyFinished ? "｜關鍵 K 完成" : "｜已鎖定") : "")
                         if not alive
                             if not na(b)
                                 box.set_extend(b, extend.none)
-                                box.set_right(b, sampleTime)
+                                box.set_right(b, sampleCloseTime)
 
             if array.size(ltfTop) > 0
                 for i = 0 to array.size(ltfTop) - 1
