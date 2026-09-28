@@ -266,6 +266,9 @@ int touchEvents = 0
 int invalidEvents = 0
 int expiredEvents = 0
 int keyEvents = 0
+// Bar-level visual flags; only confirmed key transitions can set these.
+bool bullKeyBar = false
+bool bearKeyBar = false
 
 if samples > 0
     for sample = 0 to samples - 1
@@ -557,6 +560,8 @@ if samples > 0
                             if state == 4
                                 array.push(keyCompletedHtfIds, array.get(ovHtfId, i))
                                 keyEvents += 1
+                                bullKeyBar := bullKeyBar or d == 1
+                                bearKeyBar := bearKeyBar or d == -1
                                 bullKey := bullKey or d == 1
                                 bearKey := bearKey or d == -1
                                 ending += " 位移 " + str.tostring(displacementRatio * 100.0, "#.0") + "% / 影線 " + str.tostring(forwardWickRatio * 100.0, "#.0") + "%"
@@ -708,6 +713,12 @@ if barstate.islast
 // 15m details are never drawn on the 1H overview.
 plotshape(is15m and bullFormation, title = "15m 看漲 FVG 形成", style = shape.circle, location = location.belowbar, color = color.new(color.aqua, 30), size = size.tiny, display = display.pane)
 plotshape(is15m and bearFormation, title = "15m 看跌 FVG 形成", style = shape.circle, location = location.abovebar, color = color.new(color.orange, 30), size = size.tiny, display = display.pane)
+// Independent Style controls stay usable when Graphic objects > Pane labels is off.
+// Zero offset anchors each arrow and candle color to the actual confirming 15m bar.
+plotshape(is15m and bullKeyBar, title = "多方關鍵 K 箭頭", style = shape.triangleup, location = location.belowbar, color = color.rgb(33, 150, 243), size = size.small, offset = 0, display = display.pane)
+plotshape(is15m and bearKeyBar, title = "空方關鍵 K 箭頭", style = shape.triangledown, location = location.abovebar, color = color.rgb(255, 152, 0), size = size.small, offset = 0, display = display.pane)
+barcolor(is15m ? (bullKeyBar ? color.rgb(33, 150, 243) : bearKeyBar ? color.rgb(255, 152, 0) : na) : na, title = "關鍵 K 棒色", offset = 0)
+
 // Reconciliation fields: visible in Data Window; they do not affect price scaling.
 plot(is15m ? (newConfirmedHtf ? htfBottomNow : na) : na, "1H 新確認 FVG 下界", display=display.data_window)
 plot(is15m ? (newConfirmedHtf ? htfTopNow : na) : na, "1H 新確認 FVG 上界", display=display.data_window)

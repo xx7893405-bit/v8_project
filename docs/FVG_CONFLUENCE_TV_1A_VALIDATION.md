@@ -165,3 +165,15 @@ Pine SHA-256：`f57b09ea39f3b23a74593f35e7fe9e96898e7dc07450071e0dbf31ce84cb40b2
 - 純合約函數區塊逐字未變；未重跑先前 58 項 Pine fixture。`git diff --check` 通過。這是指定樣本的價格／事件與視覺核對，不是跨週期全歷史 parity 或正式回測。
 - 暫時關閉 Tables 以排除遮擋，驗證後已恢復勾選；Boxes 保持勾選，Pane labels 保持關閉。返回 BTCUSDT 15m。
 - 未修改 V2／SMC-V2、未公開發布或推送。執行時間、token、cache hits、費用未取得可靠整段實測，`unavailable`。
+
+
+## 關鍵 K 直接定位（2026-09-29 01:02）
+
+以 `b4c677c` 為 baseline，依使用者要求改善「關鍵 K 文字難以辨認對應 K 棒」的顯示。新增只在已確認關鍵 K 棒成立的視覺旗標，15m 當根棒色與實心三角形使用零偏移：多方藍色／K 棒下方上三角，空方橘色／K 棒上方下三角。區域框內的歷史狀態與原本粗體事件文字保留，訊號判定、來源 FVG、門檻及生命週期未改。
+
+- 新增 Style 獨立項目「多方關鍵 K 箭頭」「空方關鍵 K 箭頭」「關鍵 K 棒色」。採 TradingView 官方 [plotshape](https://www.tradingview.com/pine-script-docs/visuals/text-and-shapes/) 與 [barcolor](https://www.tradingview.com/pine-script-docs/visuals/bar-coloring/)；三角形不含固定小字，原有動態文字仍使用既有粗體繪圖。
+- 最終 730 行、47,463 字元；SHA-256 `8f8f47efd14aa51f85d673a9c5a8c6a207303172f82b30ddb283346c0b9c7411`。Pine Editor 完整回讀比對相符，私人版本 6（00:55）已儲存。初版細箭頭在畫面不夠明顯，最終改為實心三角形。
+- TV 原生編譯與載入成功。在 BTCUSDT 15m，9/28 22:30 空方 K 棒可見橘色實體與上方橘色下三角；早晨多方關鍵 K 可見藍色實體與下方藍色上三角。關閉空方箭頭後三角消失而棒色保留；恢復空方箭頭、關閉棒色後三角仍在而 K 棒恢復原色；多方箭頭亦完成關閉與恢復。三個新 Style 開關有效。
+- `Pane labels` 關閉時，新三角及棒色仍可見。1H 總覽檢視中不顯示 15m 三角或棒色。最後返回 15m，三個新項目皆開啟，Boxes／Tables 開啟，Pane labels 關閉。
+- 儲存後的圖表實例曾仍連結版本 4；已明確核對版本身分、加入版本 6，再只移除被取代的版本 4。圖表只有一個本指標實例，其他指標保留。
+- 純合約函數逐字未變，沿用先前 58 項 fixture 證據，未宣稱重新執行；`git diff --check` 通過。未跑正式回測、未修改 V2／SMC-V2。執行時間、token、cache hits、費用未取得可靠整段實測，`unavailable`。
