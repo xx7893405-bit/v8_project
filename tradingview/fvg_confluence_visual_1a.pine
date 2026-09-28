@@ -1,0 +1,363 @@
+//@version=6
+indicator("V8 FVG 共振 1.0A｜視覺驗證", overlay = true, max_boxes_count = 500, max_labels_count = 500)
+
+//------------------------------------------------------------------------------
+// V8 FVG 共振 1.0A
+// 目的：純視覺驗證，不下單、不做績效宣稱。
+// 固定：1H 大週期 + 15m 小週期。
+// FVG 初版：標準三根 K 線 imbalance。
+//------------------------------------------------------------------------------
+
+const string HTF = "60"
+const string LTF = "15"
+
+string displacementChoice = input.string("50%", "關鍵 K：實體位移 / 1H FVG", options = ["30%", "50%", "70%"], group = "關鍵 K")
+string wickChoice = input.string("20%", "關鍵 K：順向影線上限", options = ["10%", "20%", "30%"], group = "關鍵 K")
+int observationBars = input.int(96, "觀察窗口（15m 根數）", minval = 1, maxval = 384, group = "觀察")
+bool oppositeVeto = input.bool(true, "暫定：1H FVG 後出現反向 15m FVG，阻擋後續新重疊區", group = "方向")
+int maxHtfZones = input.int(24, "最多保留 1H FVG", minval = 4, maxval = 80, group = "顯示")
+int maxLtfZones = input.int(48, "最多保留 15m FVG", minval = 8, maxval = 160, group = "顯示")
+int maxOverlapZones = input.int(80, "最多保留重疊區", minval = 8, maxval = 200, group = "顯示")
+
+float displacementThreshold = displacementChoice == "30%" ? 0.30 : displacementChoice == "50%" ? 0.50 : 0.70
+float wickThreshold = wickChoice == "10%" ? 0.10 : wickChoice == "20%" ? 0.20 : 0.30
+
+bool is15m = timeframe.in_seconds() == timeframe.in_seconds(LTF)
+if barstate.isfirst and not is15m
+    runtime.error("V8 FVG 共振 1.0A 請掛在 15 分鐘圖表。")
+
+//------------------------------------------------------------------------------
+// 顏色
+//------------------------------------------------------------------------------
+
+color htfBullColor = color.new(color.teal, 82)
+color htfBearColor = color.new(color.red, 84)
+color ltfBullColor = color.new(color.aqua, 89)
+color ltfBearColor = color.new(color.orange, 89)
+color overlapBullColor = color.new(color.lime, 72)
+color overlapBearColor = color.new(color.fuchsia, 74)
+color invalidColor = color.new(color.gray, 87)
+color expiredColor = color.new(color.silver, 90)
+color keyColor = color.new(color.yellow, 62)
+
+//------------------------------------------------------------------------------
+// 儲存區
+// dir: 1 = 看多, -1 = 看空
+// overlap state: 0=等待進區, 1=觀察中, 2=失效, 3=過期, 4=關鍵K已出現
+//------------------------------------------------------------------------------
+
+var array<float> htfTop = array.new<float>()
+var array<float> htfBottom = array.new<float>()
+var array<int> htfDir = array.new<int>()
+var array<bool> htfActive = array.new<bool>()
+var array<bool> htfOppositeSeen = array.new<bool>()
+var array<box> htfBoxes = array.new<box>()
+
+var array<float> ltfTop = array.new<float>()
+var array<float> ltfBottom = array.new<float>()
+var array<int> ltfDir = array.new<int>()
+var array<bool> ltfActive = array.new<bool>()
+var array<box> ltfBoxes = array.new<box>()
+
+var array<float> ovTop = array.new<float>()
+var array<float> ovBottom = array.new<float>()
+var array<int> ovDir = array.new<int>()
+var array<float> ovHtfWidth = array.new<float>()
+var array<int> ovState = array.new<int>()
+var array<int> ovTouchBar = array.new<int>()
+var array<box> ovBoxes = array.new<box>()
+
+//------------------------------------------------------------------------------
+// 取得「上一根已確認 1H K」的資料。
+// 所有 expression 都 offset 1 根，搭配 lookahead_on，避免 HTF repaint / future leak。
+// FVG：上一根 1H 為第 3 根，所以比較 low[1] vs high[3]。
+//------------------------------------------------------------------------------
+
+[htfClosedTime, htfBull, htfBullBottom, htfBullTop, htfBear, htfBearBottom, htfBearTop] = request.security(
+    syminfo.tickerid,
+    HTF,
+    [time_close[1], low[1] > high[3], high[3], low[1], high[1] < low[3], high[1], low[3]],
+    lookahead = barmerge.lookahead_on
+)
+
+bool newConfirmedHtf = barstate.isnew and not na(htfClosedTime) and ta.change(htfClosedTime) != 0
+
+//------------------------------------------------------------------------------
+// 工具：清除最舊物件，避免圖表物件超限。
+//------------------------------------------------------------------------------
+
+if array.size(htfTop) > maxHtfZones
+    box oldBox = array.shift(htfBoxes)
+    box.delete(oldBox)
+    array.shift(htfTop)
+    array.shift(htfBottom)
+    array.shift(htfDir)
+    array.shift(htfActive)
+    array.shift(htfOppositeSeen)
+
+if array.size(ltfTop) > maxLtfZones
+    box oldBox = array.shift(ltfBoxes)
+    box.delete(oldBox)
+    array.shift(ltfTop)
+    array.shift(ltfBottom)
+    array.shift(ltfDir)
+    array.shift(ltfActive)
+
+if array.size(ovTop) > maxOverlapZones
+    box oldBox = array.shift(ovBoxes)
+    box.delete(oldBox)
+    array.shift(ovTop)
+    array.shift(ovBottom)
+    array.shift(ovDir)
+    array.shift(ovHtfWidth)
+    array.shift(ovState)
+    array.shift(ovTouchBar)
+
+//------------------------------------------------------------------------------
+// 1H FVG 建立。
+// 新 1H FVG 一旦確認，就與「當下仍有效」的既有 15m 同方向 FVG 比對重疊。
+//------------------------------------------------------------------------------
+
+if newConfirmedHtf
+    if htfBull
+        box b = box.new(left = bar_index, top = htfBullTop, right = bar_index + 1, bottom = htfBullBottom, extend = extend.right, bgcolor = htfBullColor, border_color = color.new(color.teal, 25), text = "1H 看漲 FVG", text_color = color.new(color.teal, 0))
+        array.push(htfTop, htfBullTop)
+        array.push(htfBottom, htfBullBottom)
+        array.push(htfDir, 1)
+        array.push(htfActive, true)
+        array.push(htfOppositeSeen, false)
+        array.push(htfBoxes, b)
+        int hi = array.size(htfTop) - 1
+
+        if array.size(ltfTop) > 0
+            for li = 0 to array.size(ltfTop) - 1
+                if array.get(ltfActive, li) and array.get(ltfDir, li) == 1
+                    float oTop = math.min(array.get(htfTop, hi), array.get(ltfTop, li))
+                    float oBottom = math.max(array.get(htfBottom, hi), array.get(ltfBottom, li))
+                    if oTop > oBottom
+                        box ob = box.new(left = bar_index, top = oTop, right = bar_index + 1, bottom = oBottom, extend = extend.right, bgcolor = overlapBullColor, border_color = color.new(color.lime, 10), border_width = 2, text = "多｜重度流動性", text_color = color.white)
+                        array.push(ovTop, oTop)
+                        array.push(ovBottom, oBottom)
+                        array.push(ovDir, 1)
+                        array.push(ovHtfWidth, array.get(htfTop, hi) - array.get(htfBottom, hi))
+                        array.push(ovState, 0)
+                        array.push(ovTouchBar, na)
+                        array.push(ovBoxes, ob)
+
+    if htfBear
+        box b = box.new(left = bar_index, top = htfBearTop, right = bar_index + 1, bottom = htfBearBottom, extend = extend.right, bgcolor = htfBearColor, border_color = color.new(color.red, 25), text = "1H 看跌 FVG", text_color = color.new(color.red, 0))
+        array.push(htfTop, htfBearTop)
+        array.push(htfBottom, htfBearBottom)
+        array.push(htfDir, -1)
+        array.push(htfActive, true)
+        array.push(htfOppositeSeen, false)
+        array.push(htfBoxes, b)
+        int hi = array.size(htfTop) - 1
+
+        if array.size(ltfTop) > 0
+            for li = 0 to array.size(ltfTop) - 1
+                if array.get(ltfActive, li) and array.get(ltfDir, li) == -1
+                    float oTop = math.min(array.get(htfTop, hi), array.get(ltfTop, li))
+                    float oBottom = math.max(array.get(htfBottom, hi), array.get(ltfBottom, li))
+                    if oTop > oBottom
+                        box ob = box.new(left = bar_index, top = oTop, right = bar_index + 1, bottom = oBottom, extend = extend.right, bgcolor = overlapBearColor, border_color = color.new(color.fuchsia, 10), border_width = 2, text = "空｜重度流動性", text_color = color.white)
+                        array.push(ovTop, oTop)
+                        array.push(ovBottom, oBottom)
+                        array.push(ovDir, -1)
+                        array.push(ovHtfWidth, array.get(htfTop, hi) - array.get(htfBottom, hi))
+                        array.push(ovState, 0)
+                        array.push(ovTouchBar, na)
+                        array.push(ovBoxes, ob)
+
+//------------------------------------------------------------------------------
+// 15m FVG。
+// 只在 15m K 收盤後建立，避免尚未收盤的 LTF 訊號。
+//------------------------------------------------------------------------------
+
+bool newLtfBull = barstate.isconfirmed and low > high[2]
+bool newLtfBear = barstate.isconfirmed and high < low[2]
+
+if newLtfBull
+    float zTop = low
+    float zBottom = high[2]
+    box b = box.new(left = bar_index, top = zTop, right = bar_index + 1, bottom = zBottom, extend = extend.right, bgcolor = ltfBullColor, border_color = color.new(color.aqua, 45), text = "15m 多 FVG", text_color = color.new(color.aqua, 5))
+    array.push(ltfTop, zTop)
+    array.push(ltfBottom, zBottom)
+    array.push(ltfDir, 1)
+    array.push(ltfActive, true)
+    array.push(ltfBoxes, b)
+
+    if array.size(htfTop) > 0
+        for hi = 0 to array.size(htfTop) - 1
+            if array.get(htfActive, hi)
+                if array.get(htfDir, hi) == -1
+                    array.set(htfOppositeSeen, hi, true)
+                if array.get(htfDir, hi) == 1
+                    bool blocked = oppositeVeto and array.get(htfOppositeSeen, hi)
+                    float oTop = math.min(array.get(htfTop, hi), zTop)
+                    float oBottom = math.max(array.get(htfBottom, hi), zBottom)
+                    if not blocked and oTop > oBottom
+                        box ob = box.new(left = bar_index, top = oTop, right = bar_index + 1, bottom = oBottom, extend = extend.right, bgcolor = overlapBullColor, border_color = color.new(color.lime, 10), border_width = 2, text = "多｜重度流動性", text_color = color.white)
+                        array.push(ovTop, oTop)
+                        array.push(ovBottom, oBottom)
+                        array.push(ovDir, 1)
+                        array.push(ovHtfWidth, array.get(htfTop, hi) - array.get(htfBottom, hi))
+                        array.push(ovState, 0)
+                        array.push(ovTouchBar, na)
+                        array.push(ovBoxes, ob)
+
+if newLtfBear
+    float zTop = low[2]
+    float zBottom = high
+    box b = box.new(left = bar_index, top = zTop, right = bar_index + 1, bottom = zBottom, extend = extend.right, bgcolor = ltfBearColor, border_color = color.new(color.orange, 45), text = "15m 空 FVG", text_color = color.new(color.orange, 5))
+    array.push(ltfTop, zTop)
+    array.push(ltfBottom, zBottom)
+    array.push(ltfDir, -1)
+    array.push(ltfActive, true)
+    array.push(ltfBoxes, b)
+
+    if array.size(htfTop) > 0
+        for hi = 0 to array.size(htfTop) - 1
+            if array.get(htfActive, hi)
+                if array.get(htfDir, hi) == 1
+                    array.set(htfOppositeSeen, hi, true)
+                if array.get(htfDir, hi) == -1
+                    bool blocked = oppositeVeto and array.get(htfOppositeSeen, hi)
+                    float oTop = math.min(array.get(htfTop, hi), zTop)
+                    float oBottom = math.max(array.get(htfBottom, hi), zBottom)
+                    if not blocked and oTop > oBottom
+                        box ob = box.new(left = bar_index, top = oTop, right = bar_index + 1, bottom = oBottom, extend = extend.right, bgcolor = overlapBearColor, border_color = color.new(color.fuchsia, 10), border_width = 2, text = "空｜重度流動性", text_color = color.white)
+                        array.push(ovTop, oTop)
+                        array.push(ovBottom, oBottom)
+                        array.push(ovDir, -1)
+                        array.push(ovHtfWidth, array.get(htfTop, hi) - array.get(htfBottom, hi))
+                        array.push(ovState, 0)
+                        array.push(ovTouchBar, na)
+                        array.push(ovBoxes, ob)
+
+//------------------------------------------------------------------------------
+// FVG 自身失效：15m 收盤完整穿過 FVG 遠端邊界後停止延伸。
+// 這只是視覺生命週期；重疊區有自己的失效規則。
+//------------------------------------------------------------------------------
+
+if barstate.isconfirmed and array.size(htfTop) > 0
+    for i = 0 to array.size(htfTop) - 1
+        if array.get(htfActive, i)
+            int d = array.get(htfDir, i)
+            float t = array.get(htfTop, i)
+            float bot = array.get(htfBottom, i)
+            bool dead = d == 1 ? close < bot : close > t
+            if dead
+                array.set(htfActive, i, false)
+                box b = array.get(htfBoxes, i)
+                box.set_extend(b, extend.none)
+                box.set_right(b, bar_index)
+                box.set_bgcolor(b, invalidColor)
+
+if barstate.isconfirmed and array.size(ltfTop) > 0
+    for i = 0 to array.size(ltfTop) - 1
+        if array.get(ltfActive, i)
+            int d = array.get(ltfDir, i)
+            float t = array.get(ltfTop, i)
+            float bot = array.get(ltfBottom, i)
+            bool dead = d == 1 ? close < bot : close > t
+            if dead
+                array.set(ltfActive, i, false)
+                box b = array.get(ltfBoxes, i)
+                box.set_extend(b, extend.none)
+                box.set_right(b, bar_index)
+                box.set_bgcolor(b, invalidColor)
+
+//------------------------------------------------------------------------------
+// 重度流動性區：失效 -> 觸碰 -> 觀察 -> 關鍵 K / 過期。
+//------------------------------------------------------------------------------
+
+if barstate.isconfirmed and array.size(ovTop) > 0
+    for i = 0 to array.size(ovTop) - 1
+        int state = array.get(ovState, i)
+        if state == 0 or state == 1
+            int d = array.get(ovDir, i)
+            float t = array.get(ovTop, i)
+            float bot = array.get(ovBottom, i)
+            box b = array.get(ovBoxes, i)
+
+            bool invalid = d == 1 ? close < bot : close > t
+            if invalid
+                array.set(ovState, i, 2)
+                box.set_extend(b, extend.none)
+                box.set_right(b, bar_index)
+                box.set_bgcolor(b, invalidColor)
+                box.set_text(b, d == 1 ? "多｜失效" : "空｜失效")
+            else
+                bool touches = low <= t and high >= bot
+                if state == 0 and touches
+                    array.set(ovState, i, 1)
+                    array.set(ovTouchBar, i, bar_index)
+                    state := 1
+
+                if state == 1
+                    int touchedAt = array.get(ovTouchBar, i)
+                    int barsObserved = bar_index - touchedAt + 1
+                    bool inWindow = barsObserved <= observationBars
+
+                    float candleRange = high - low
+                    float body = math.abs(close - open)
+                    float htfWidth = array.get(ovHtfWidth, i)
+                    float displacementRatio = htfWidth > 0 ? body / htfWidth : na
+
+                    bool correctDirection = d == 1 ? close > open : close < open
+                    float forwardWick = d == 1 ? high - close : close - low
+                    float forwardWickRatio = candleRange > 0 ? forwardWick / candleRange : na
+
+                    bool keyCandle = inWindow and correctDirection and displacementRatio >= displacementThreshold and forwardWickRatio <= wickThreshold
+
+                    if keyCandle
+                        array.set(ovState, i, 4)
+                        box.set_extend(b, extend.none)
+                        box.set_right(b, bar_index)
+                        box.set_bgcolor(b, keyColor)
+                        box.set_text(b, d == 1 ? "多｜關鍵 K 已出現" : "空｜關鍵 K 已出現")
+                        string txt = "關鍵 K\n位移 " + str.tostring(displacementRatio * 100.0, "#.0") + "%\n順向影線 " + str.tostring(forwardWickRatio * 100.0, "#.0") + "%"
+                        label.new(bar_index, d == 1 ? low : high, txt, style = d == 1 ? label.style_label_up : label.style_label_down, textcolor = color.black, color = color.yellow, size = size.small)
+                    else if not inWindow
+                        array.set(ovState, i, 3)
+                        box.set_extend(b, extend.none)
+                        box.set_right(b, bar_index)
+                        box.set_bgcolor(b, expiredColor)
+                        box.set_text(b, d == 1 ? "多｜觀察過期" : "空｜觀察過期")
+
+//------------------------------------------------------------------------------
+// 動態優先序。
+// 做多：重疊區中位價越低，優先度越高。
+// 做空：重疊區中位價越高，優先度越高。
+// 只對尚未完成的 state 0 / 1 排序。
+//------------------------------------------------------------------------------
+
+if array.size(ovTop) > 0
+    for i = 0 to array.size(ovTop) - 1
+        int stateI = array.get(ovState, i)
+        if stateI == 0 or stateI == 1
+            int dI = array.get(ovDir, i)
+            float midI = (array.get(ovTop, i) + array.get(ovBottom, i)) / 2.0
+            int rank = 1
+
+            for j = 0 to array.size(ovTop) - 1
+                if i != j
+                    int stateJ = array.get(ovState, j)
+                    int dJ = array.get(ovDir, j)
+                    if (stateJ == 0 or stateJ == 1) and dJ == dI
+                        float midJ = (array.get(ovTop, j) + array.get(ovBottom, j)) / 2.0
+                        bool higherPriority = dI == 1 ? midJ < midI : midJ > midI
+                        if higherPriority
+                            rank += 1
+
+            box b = array.get(ovBoxes, i)
+            string stateText = stateI == 0 ? "等待進區" : "觀察中"
+            box.set_text(b, (dI == 1 ? "多" : "空") + " P" + str.tostring(rank) + "\n重度流動性｜" + stateText)
+
+//------------------------------------------------------------------------------
+// 圖上提示。
+//------------------------------------------------------------------------------
+
+plotshape(newLtfBull, title = "15m 看漲 FVG 形成", style = shape.circle, location = location.belowbar, color = color.new(color.aqua, 30), size = size.tiny, text = "F+")
+plotshape(newLtfBear, title = "15m 看跌 FVG 形成", style = shape.circle, location = location.abovebar, color = color.new(color.orange, 30), size = size.tiny, text = "F-")
