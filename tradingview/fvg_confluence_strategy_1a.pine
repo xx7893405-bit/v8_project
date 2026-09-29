@@ -84,6 +84,8 @@ var array<bool> htfActive = array.new<bool>()
 var array<bool> htfOppositeSeen = array.new<bool>()
 var array<box> htfBoxes = array.new<box>()
 var array<int> htfSourceId = array.new<int>()
+// Drawing origin only; source IDs and eligibility continue to use confirmation time.
+var array<int> htfOpenedAt = array.new<int>()
 var array<int> htfFirstBar = array.new<int>()
 var array<bool> htfUsed = array.new<bool>()
 
@@ -107,6 +109,7 @@ var array<int> ovId = array.new<int>()
 var array<int> ovRank = array.new<int>()
 var array<int> ovEligibleBar = array.new<int>()
 var array<int> ovHtfId = array.new<int>()
+var array<int> ovHtfOpenedAt = array.new<int>()
 var array<float> ovHtfTop = array.new<float>()
 var array<float> ovHtfBottom = array.new<float>()
 var array<int> ovLtfId = array.new<int>()
@@ -119,6 +122,7 @@ var array<string> failureSources = array.new<string>()
 var array<string> failureZones = array.new<string>()
 var array<string> failureReasons = array.new<string>()
 var array<int> failureHtfIds = array.new<int>()
+var array<int> failureHtfOpenedAt = array.new<int>()
 var array<float> failureHtfBottoms = array.new<float>()
 var array<float> failureHtfTops = array.new<float>()
 var array<int> failureClosedAt = array.new<int>()
@@ -218,15 +222,17 @@ f_sim_can_enter(int sourceId, array<int> usedSources, float positionSize, bool p
 // END SIM CONTRACT FUNCTIONS
 
 // Keep geometry alongside the same rolling ten events, even after live sources retire.
-f_record_failure(string timeText, string kindText, string sourceText, string zoneText, string reasonText, int sourceId, float sourceBottom, float sourceTop, int closedAt, int direction) =>
+f_record_failure(string timeText, string kindText, string sourceText, string zoneText, string reasonText, int sourceId, float sourceBottom, float sourceTop, int closedAt, int direction, int sourceOpenedAt) =>
     if f_display_side(direction)
         f_push_failure(failureTimes, failureKinds, failureSources, failureZones, failureReasons, timeText, kindText, sourceText, zoneText, reasonText)
         array.push(failureHtfIds, sourceId)
+        array.push(failureHtfOpenedAt, sourceOpenedAt)
         array.push(failureHtfBottoms, sourceBottom)
         array.push(failureHtfTops, sourceTop)
         array.push(failureClosedAt, closedAt)
         while array.size(failureHtfIds) > 10
             array.shift(failureHtfIds)
+            array.shift(failureHtfOpenedAt)
             array.shift(failureHtfBottoms)
             array.shift(failureHtfTops)
             array.shift(failureClosedAt)
@@ -262,6 +268,7 @@ f_trim_overlaps() =>
         array.shift(ovRank)
         array.shift(ovEligibleBar)
         array.shift(ovHtfId)
+        array.shift(ovHtfOpenedAt)
         array.shift(ovHtfTop)
         array.shift(ovHtfBottom)
         array.shift(ovLtfId)
@@ -312,9 +319,10 @@ if is15m and runSignalEngine and entryPending and bar_index > pendingBar
 // FVG：上一根 1H 為第 3 根，所以比較 low[1] vs high[3]。
 //------------------------------------------------------------------------------
 
-[htfClosedTime, htfHigh, htfLow, htfOldHigh, htfOldLow] = request.security(
+// The third candle open anchors drawings retrospectively ONLY after confirmation.
+[htfOpenedTime, htfClosedTime, htfHigh, htfLow, htfOldHigh, htfOldLow] = request.security(
     syminfo.tickerid, HTF,
-    [time_close[1], high[1], low[1], high[3], low[3]],
+    [time[1], time_close[1], high[1], low[1], high[3], low[3]],
     lookahead = barmerge.lookahead_on
 )
 [htfDirection, htfBottomNow, htfTopNow] = f_gap(htfHigh, htfLow, htfOldHigh, htfOldLow)
@@ -390,7 +398,7 @@ if runSignalEngine and samples > 0
             ranksDirty := false
             if newConfirmedHtf and (is15m or hourSeed)
                 if htfBull
-                    box b = showBullFvg ? box.new(left = sampleTime, xloc = xloc.bar_time, top = htfBullTop, right = sampleCloseTime, bottom = htfBullBottom, extend = extend.right, bgcolor = htfBullColor, border_color = color.new(color.teal, 25), text = "1H 看漲 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top) : na
+                    box b = showBullFvg ? box.new(left = htfOpenedTime, xloc = xloc.bar_time, top = htfBullTop, right = sampleCloseTime, bottom = htfBullBottom, extend = extend.right, bgcolor = htfBullColor, border_color = color.new(color.teal, 25), text = "1H 看漲 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top) : na
                     array.push(htfTop, htfBullTop)
                     array.push(htfBottom, htfBullBottom)
                     array.push(htfDir, 1)
@@ -398,6 +406,7 @@ if runSignalEngine and samples > 0
                     array.push(htfOppositeSeen, false)
                     array.push(htfBoxes, b)
                     array.push(htfSourceId, htfClosedTime)
+                    array.push(htfOpenedAt, htfOpenedTime)
                     array.push(htfFirstBar, sampleIndex)
                     array.push(htfUsed, false)
                     int hi = array.size(htfTop) - 1
@@ -419,6 +428,7 @@ if runSignalEngine and samples > 0
                                     array.push(ovRank, 1)
                                     array.push(ovEligibleBar, sampleIndex)
                                     array.push(ovHtfId, array.get(htfSourceId, hi))
+                                    array.push(ovHtfOpenedAt, array.get(htfOpenedAt, hi))
                                     array.push(ovHtfTop, array.get(htfTop, hi))
                                     array.push(ovHtfBottom, array.get(htfBottom, hi))
                                     array.push(ovLtfId, array.get(ltfSourceId, li))
@@ -429,7 +439,7 @@ if runSignalEngine and samples > 0
                                     f_trim_overlaps()
 
                 if htfBear
-                    box b = showBearFvg ? box.new(left = sampleTime, xloc = xloc.bar_time, top = htfBearTop, right = sampleCloseTime, bottom = htfBearBottom, extend = extend.right, bgcolor = htfBearColor, border_color = color.new(color.red, 25), text = "1H 看跌 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top) : na
+                    box b = showBearFvg ? box.new(left = htfOpenedTime, xloc = xloc.bar_time, top = htfBearTop, right = sampleCloseTime, bottom = htfBearBottom, extend = extend.right, bgcolor = htfBearColor, border_color = color.new(color.red, 25), text = "1H 看跌 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top) : na
                     array.push(htfTop, htfBearTop)
                     array.push(htfBottom, htfBearBottom)
                     array.push(htfDir, -1)
@@ -437,6 +447,7 @@ if runSignalEngine and samples > 0
                     array.push(htfOppositeSeen, false)
                     array.push(htfBoxes, b)
                     array.push(htfSourceId, htfClosedTime)
+                    array.push(htfOpenedAt, htfOpenedTime)
                     array.push(htfFirstBar, sampleIndex)
                     array.push(htfUsed, false)
                     int hi = array.size(htfTop) - 1
@@ -458,6 +469,7 @@ if runSignalEngine and samples > 0
                                     array.push(ovRank, 1)
                                     array.push(ovEligibleBar, sampleIndex)
                                     array.push(ovHtfId, array.get(htfSourceId, hi))
+                                    array.push(ovHtfOpenedAt, array.get(htfOpenedAt, hi))
                                     array.push(ovHtfTop, array.get(htfTop, hi))
                                     array.push(ovHtfBottom, array.get(htfBottom, hi))
                                     array.push(ovLtfId, array.get(ltfSourceId, li))
@@ -515,6 +527,7 @@ if runSignalEngine and samples > 0
                                     array.push(ovRank, 1)
                                     array.push(ovEligibleBar, sampleIndex + 1)
                                     array.push(ovHtfId, array.get(htfSourceId, hi))
+                                    array.push(ovHtfOpenedAt, array.get(htfOpenedAt, hi))
                                     array.push(ovHtfTop, array.get(htfTop, hi))
                                     array.push(ovHtfBottom, array.get(htfBottom, hi))
                                     array.push(ovLtfId, sampleCloseTime)
@@ -558,6 +571,7 @@ if runSignalEngine and samples > 0
                                     array.push(ovRank, 1)
                                     array.push(ovEligibleBar, sampleIndex + 1)
                                     array.push(ovHtfId, array.get(htfSourceId, hi))
+                                    array.push(ovHtfOpenedAt, array.get(htfOpenedAt, hi))
                                     array.push(ovHtfTop, array.get(htfTop, hi))
                                     array.push(ovHtfBottom, array.get(htfBottom, hi))
                                     array.push(ovLtfId, sampleCloseTime)
@@ -581,6 +595,7 @@ if runSignalEngine and samples > 0
                 array.shift(htfActive)
                 array.shift(htfOppositeSeen)
                 array.shift(htfSourceId)
+                array.shift(htfOpenedAt)
                 array.shift(htfFirstBar)
                 array.shift(htfUsed)
 
@@ -655,7 +670,7 @@ if runSignalEngine and samples > 0
                                 string sourceText = "來源 1H FVG " + str.format_time(array.get(ovHtfId, i), "YYYY.MM.dd HH:mm", syminfo.timezone) + " [" + str.tostring(sourceBottom, format.mintick) + "–" + str.tostring(sourceTop, format.mintick) + "]"
                                 string overlapText = "重疊 Z" + str.tostring(array.get(ovId, i)) + " [" + str.tostring(overlapBottom, format.mintick) + "–" + str.tostring(overlapTop, format.mintick) + "]"
                                 string reasonText = d == 1 ? "收盤 " + str.tostring(sampleClose, format.mintick) + " < 下界 " + str.tostring(overlapBottom, format.mintick) : "收盤 " + str.tostring(sampleClose, format.mintick) + " > 上界 " + str.tostring(overlapTop, format.mintick)
-                                f_record_failure(eventTimeText, eventKind, sourceText, overlapText, reasonText, array.get(ovHtfId, i), sourceBottom, sourceTop, sampleCloseTime, d)
+                                f_record_failure(eventTimeText, eventKind, sourceText, overlapText, reasonText, array.get(ovHtfId, i), sourceBottom, sourceTop, sampleCloseTime, d, array.get(ovHtfOpenedAt, i))
                             if state == 3 or state == 5
                                 expiredEvents += f_display_side(d) ? 1 : 0
                             if state == 4
@@ -730,7 +745,7 @@ if runSignalEngine and samples > 0
                                 string sourceText = "1H FVG " + str.format_time(array.get(htfSourceId, i), "YYYY.MM.dd HH:mm", syminfo.timezone) + " [" + str.tostring(sourceBottom, format.mintick) + "–" + str.tostring(sourceTop, format.mintick) + "]"
                                 string zoneText = "1H FVG [" + str.tostring(sourceBottom, format.mintick) + "–" + str.tostring(sourceTop, format.mintick) + "]"
                                 string reasonText = d == 1 ? "收盤 " + str.tostring(sampleClose, format.mintick) + " < 下界 " + str.tostring(sourceBottom, format.mintick) : "收盤 " + str.tostring(sampleClose, format.mintick) + " > 上界 " + str.tostring(sourceTop, format.mintick)
-                                f_record_failure(eventTimeText, eventKind, sourceText, zoneText, reasonText, array.get(htfSourceId, i), sourceBottom, sourceTop, sampleCloseTime, d)
+                                f_record_failure(eventTimeText, eventKind, sourceText, zoneText, reasonText, array.get(htfSourceId, i), sourceBottom, sourceTop, sampleCloseTime, d, array.get(htfOpenedAt, i))
                             alive := not invalid and f_keep_source(array.get(htfUsed, i), hasSetup, sampleIndex, array.get(htfFirstBar, i), observationBars)
                             array.set(htfActive, i, alive)
                             // Keep the full source as a finite historical drawing when its last child completes.
@@ -809,7 +824,7 @@ if barstate.islast or barstate.islastconfirmedhistory
             if not array.includes(drawnFailureSources, sourceId)
                 int closedAt = array.get(failureClosedAt, logIndex)
                 string archiveText = array.get(failureKinds, logIndex) + "\n" + str.format_time(closedAt, "MM-dd HH:mm", syminfo.timezone) + " " + syminfo.timezone
-                box archived = box.new(left = sourceId, right = closedAt, xloc = xloc.bar_time,
+                box archived = box.new(left = array.get(failureHtfOpenedAt, logIndex), right = closedAt, xloc = xloc.bar_time,
                     top = array.get(failureHtfTops, logIndex), bottom = array.get(failureHtfBottoms, logIndex), extend = extend.none,
                     bgcolor = color.new(color.rgb(239, 83, 80), 88), border_color = color.new(color.red, 45), border_style = line.style_dashed,
                     text = archiveText, text_color = color.new(color.red, 10), text_size = zoneTextSize, text_formatting = text.format_bold,
