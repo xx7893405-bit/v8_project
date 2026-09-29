@@ -1,0 +1,37 @@
+{
+  "issue": 202,
+  "baseline": "c0d7e2b",
+  "branch": "codex/fvg-confluence-tv-dual",
+  "date": "2026-09-29",
+  "files": {
+    "tradingview/fvg_confluence_strategy_1a.pine": "c03e25b6f70953864501812a9a35648a7225032d2031af56d018ef00a5ebd594",
+    "tests/pine/build_fvg_sim_tests.py": "b38abf292f1fb3adc85b47d89c4b21bdc8352dcae24b8d6f28e8e2a8434597a4",
+    "tests/pine/fvg_sim_contract_cases.pine": "26127165bfa984b5626acb0c4ef399244b773a7ae49e5d33c678edcfc37d7697",
+    "tradingview/fvg_confluence_visual_1a.pine": "8f8f47efd14aa51f85d673a9c5a8c6a207303172f82b30ddb283346c0b9c7411"
+  },
+  "contract_fixture_sha256": "69cbbc2d034d3c10a64a288f75a5ccfe848ff8767791d8168f3323cb7a39e700",
+  "native_contract_assertions_passed": 23,
+  "tv_script": "V8 FVG 共振 1.0A｜多空獨立",
+  "tv_version": 1,
+  "chart": "https://www.tradingview.com/chart/WVcin0WD/",
+  "instances": [
+    {
+      "direction": "long_only",
+      "fvg_overlay": true
+    },
+    {
+      "direction": "short_only",
+      "fvg_overlay": false
+    }
+  ],
+  "initial_capital_each": 100000,
+  "fixed_qty_each": 0.001,
+  "commission_percent": 0,
+  "slippage_ticks": 0,
+  "formal_v8_backtest": false,
+  "limitations": [
+    "Separate native emulators and capital, no merged hedge equity",
+    "Bounded visual validation, no extended realtime forward validation",
+    "Default native OHLC path, no Bar Magnifier"
+  ]
+}

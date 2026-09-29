@@ -23,7 +23,7 @@ def main():
                + extract(text, "SIM CONTRACT FUNCTIONS") + "\n"
                + Path(__file__).with_name("fvg_sim_contract_cases.pine").read_text())
     if args.mode == "timing":
-        header = text.splitlines()[1].replace("V8 FVG 共振 1.0A｜模擬交易", "FVG Sim Timing Tests")
+        header = text.splitlines()[1].replace("V8 FVG 共振 1.0A｜多空獨立", "FVG Sim Timing Tests")
         fixture = "//@version=6\n" + header + "\n" + extract(text, "SIM CONTRACT FUNCTIONS") + "\n" + extract(text, "SIM SCHEDULER") + "\n" + Path(__file__).with_name("fvg_sim_timing_cases.pine").read_text()
     args.output.write_text(fixture)
     print(json.dumps({"fixture": str(args.output), "sha256": hashlib.sha256(fixture.encode()).hexdigest(),

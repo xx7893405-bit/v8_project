@@ -1,6 +1,6 @@
 //@version=6
-strategy("V8 FVG 共振 1.0A｜模擬交易", overlay = true, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 300, pyramiding = 0, initial_capital = 100000, default_qty_type = strategy.fixed, default_qty_value = 0.001, margin_long = 100, margin_short = 100, commission_type = strategy.commission.percent, commission_value = 0, slippage = 0, calc_on_order_fills = true, calc_on_every_tick = false, process_orders_on_close = false)
-// Issues #200 / #201. Native broker-emulator demonstration; no live orders.
+strategy("V8 FVG 共振 1.0A｜多空獨立", overlay = true, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 300, pyramiding = 0, initial_capital = 100000, default_qty_type = strategy.fixed, default_qty_value = 0.001, margin_long = 100, margin_short = 100, commission_type = strategy.commission.percent, commission_value = 0, slippage = 0, calc_on_order_fills = true, calc_on_every_tick = false, process_orders_on_close = false)
+// Issues #200 / #201 / #202. Native broker-emulator demonstration; no live orders.
 // Visual baseline: 6ec5ac9. Zero costs are illustrative, not performance evidence.
 
 //------------------------------------------------------------------------------
@@ -22,6 +22,10 @@ int maxLtfZones = input.int(48, "最多保留 15m FVG", minval = 8, maxval = 160
 int maxOverlapZones = input.int(80, "最多保留重疊區", minval = 8, maxval = 200, group = "顯示")
 int zoneTextSize = input.int(14, "區域文字大小", minval = 10, maxval = 32, group = "顯示")
 int eventTextSize = input.int(16, "訊號文字大小（粗體）", minval = 10, maxval = 36, group = "顯示")
+
+string tradeMode = input.string("雙向單倉（舊版）", "此實例交易方向", options=["僅做多", "僅做空", "雙向單倉（舊版）"], group="模擬交易", tooltip="同圖加入兩個實例，分別僅做多／僅做空，即可各持一筆；資金與報表各自獨立。")
+int tradeSide = tradeMode == "僅做多" ? 1 : tradeMode == "僅做空" ? -1 : 0
+bool showFvgOverlay = input.bool(true, "顯示 FVG 圖形（雙實例僅開一份）", group="顯示")
 
 float stopBufferPct = input.float(1.0, "SL：1H FVG 寬度緩衝 %", minval=1.0, step=0.1, group="模擬交易")
 float targetRR = input.float(2.0, "TP：報酬／風險 R 倍數", minval=0.1, step=0.1, group="模擬交易")
@@ -195,8 +199,8 @@ f_sim_target(int direction, float entry, float stop, float rr, float tick) =>
     float risk = direction * (entry - stop)
     float raw = entry + direction * risk * rr
     risk > 0 and rr > 0 ? (direction == 1 ? math.ceil(raw / tick - 1e-8) * tick : math.floor(raw / tick + 1e-8) * tick) : na
-f_sim_can_enter(int sourceId, array<int> usedSources, float positionSize, bool pending) =>
-    positionSize == 0 and not pending and not array.includes(usedSources, sourceId)
+f_sim_can_enter(int sourceId, array<int> usedSources, float positionSize, bool pending, int direction = 0, int side = 0) =>
+    (side == 0 or direction == side) and positionSize == 0 and not pending and not array.includes(usedSources, sourceId)
 // END SIM CONTRACT FUNCTIONS
 
 // Keep geometry alongside the same rolling ten events, even after live sources retire.
@@ -371,7 +375,7 @@ if runSignalEngine and samples > 0
             ranksDirty := false
             if newConfirmedHtf and (is15m or hourSeed)
                 if htfBull
-                    box b = box.new(left = sampleTime, xloc = xloc.bar_time, top = htfBullTop, right = sampleCloseTime, bottom = htfBullBottom, extend = extend.right, bgcolor = htfBullColor, border_color = color.new(color.teal, 25), text = "1H 看漲 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top)
+                    box b = showFvgOverlay ? box.new(left = sampleTime, xloc = xloc.bar_time, top = htfBullTop, right = sampleCloseTime, bottom = htfBullBottom, extend = extend.right, bgcolor = htfBullColor, border_color = color.new(color.teal, 25), text = "1H 看漲 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top) : na
                     array.push(htfTop, htfBullTop)
                     array.push(htfBottom, htfBullBottom)
                     array.push(htfDir, 1)
@@ -388,7 +392,7 @@ if runSignalEngine and samples > 0
                             if array.get(ltfActive, li) and array.get(ltfDir, li) == 1 and f_can_pair(sampleIndex, array.get(ltfFirstBar, li), observationBars)
                                 [hasOverlap, oBottom, oTop] = f_overlap(array.get(htfBottom, hi), array.get(htfTop, hi), array.get(ltfBottom, li), array.get(ltfTop, li))
                                 if hasOverlap
-                                    box ob = is15m ? box.new(left = sampleTime, xloc = xloc.bar_time, top = oTop, right = sampleCloseTime, bottom = oBottom, extend = extend.right, bgcolor = overlapBullColor, border_color = color.new(color.lime, 10), border_width = 2, text = "多｜重度流動性", text_color = chart.fg_color, text_size = zoneTextSize, text_formatting = text.format_bold, text_halign = text.align_right, text_valign = text.align_top) : na
+                                    box ob = is15m and showFvgOverlay ? box.new(left = sampleTime, xloc = xloc.bar_time, top = oTop, right = sampleCloseTime, bottom = oBottom, extend = extend.right, bgcolor = overlapBullColor, border_color = color.new(color.lime, 10), border_width = 2, text = "多｜重度流動性", text_color = chart.fg_color, text_size = zoneTextSize, text_formatting = text.format_bold, text_halign = text.align_right, text_valign = text.align_top) : na
                                     array.push(ovTop, oTop)
                                     array.push(ovBottom, oBottom)
                                     array.push(ovDir, 1)
@@ -410,7 +414,7 @@ if runSignalEngine and samples > 0
                                     f_trim_overlaps()
 
                 if htfBear
-                    box b = box.new(left = sampleTime, xloc = xloc.bar_time, top = htfBearTop, right = sampleCloseTime, bottom = htfBearBottom, extend = extend.right, bgcolor = htfBearColor, border_color = color.new(color.red, 25), text = "1H 看跌 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top)
+                    box b = showFvgOverlay ? box.new(left = sampleTime, xloc = xloc.bar_time, top = htfBearTop, right = sampleCloseTime, bottom = htfBearBottom, extend = extend.right, bgcolor = htfBearColor, border_color = color.new(color.red, 25), text = "1H 看跌 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top) : na
                     array.push(htfTop, htfBearTop)
                     array.push(htfBottom, htfBearBottom)
                     array.push(htfDir, -1)
@@ -427,7 +431,7 @@ if runSignalEngine and samples > 0
                             if array.get(ltfActive, li) and array.get(ltfDir, li) == -1 and f_can_pair(sampleIndex, array.get(ltfFirstBar, li), observationBars)
                                 [hasOverlap, oBottom, oTop] = f_overlap(array.get(htfBottom, hi), array.get(htfTop, hi), array.get(ltfBottom, li), array.get(ltfTop, li))
                                 if hasOverlap
-                                    box ob = is15m ? box.new(left = sampleTime, xloc = xloc.bar_time, top = oTop, right = sampleCloseTime, bottom = oBottom, extend = extend.right, bgcolor = overlapBearColor, border_color = color.new(color.fuchsia, 10), border_width = 2, text = "空｜重度流動性", text_color = chart.fg_color, text_size = zoneTextSize, text_formatting = text.format_bold, text_halign = text.align_right, text_valign = text.align_top) : na
+                                    box ob = is15m and showFvgOverlay ? box.new(left = sampleTime, xloc = xloc.bar_time, top = oTop, right = sampleCloseTime, bottom = oBottom, extend = extend.right, bgcolor = overlapBearColor, border_color = color.new(color.fuchsia, 10), border_width = 2, text = "空｜重度流動性", text_color = chart.fg_color, text_size = zoneTextSize, text_formatting = text.format_bold, text_halign = text.align_right, text_valign = text.align_top) : na
                                     array.push(ovTop, oTop)
                                     array.push(ovBottom, oBottom)
                                     array.push(ovDir, -1)
@@ -465,7 +469,7 @@ if runSignalEngine and samples > 0
             if newLtfBull
                 float zTop = ltfTopNow
                 float zBottom = ltfBottomNow
-                box b = is15m ? box.new(left = sampleTime, xloc = xloc.bar_time, top = zTop, right = sampleCloseTime, bottom = zBottom, extend = extend.right, bgcolor = ltfBullColor, border_color = color.new(color.aqua, 45), text = "15m 多 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top) : na
+                box b = is15m and showFvgOverlay ? box.new(left = sampleTime, xloc = xloc.bar_time, top = zTop, right = sampleCloseTime, bottom = zBottom, extend = extend.right, bgcolor = ltfBullColor, border_color = color.new(color.aqua, 45), text = "15m 多 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top) : na
                 array.push(ltfTop, zTop)
                 array.push(ltfBottom, zBottom)
                 array.push(ltfDir, 1)
@@ -484,7 +488,7 @@ if runSignalEngine and samples > 0
                                 bool blocked = not f_direction_allowed(oppositeVeto, array.get(htfOppositeSeen, hi))
                                 [hasOverlap, oBottom, oTop] = f_overlap(array.get(htfBottom, hi), array.get(htfTop, hi), zBottom, zTop)
                                 if not blocked and hasOverlap
-                                    box ob = is15m ? box.new(left = sampleTime, xloc = xloc.bar_time, top = oTop, right = sampleCloseTime, bottom = oBottom, extend = extend.right, bgcolor = overlapBullColor, border_color = color.new(color.lime, 10), border_width = 2, text = "多｜重度流動性", text_color = chart.fg_color, text_size = zoneTextSize, text_formatting = text.format_bold, text_halign = text.align_right, text_valign = text.align_top) : na
+                                    box ob = is15m and showFvgOverlay ? box.new(left = sampleTime, xloc = xloc.bar_time, top = oTop, right = sampleCloseTime, bottom = oBottom, extend = extend.right, bgcolor = overlapBullColor, border_color = color.new(color.lime, 10), border_width = 2, text = "多｜重度流動性", text_color = chart.fg_color, text_size = zoneTextSize, text_formatting = text.format_bold, text_halign = text.align_right, text_valign = text.align_top) : na
                                     array.push(ovTop, oTop)
                                     array.push(ovBottom, oBottom)
                                     array.push(ovDir, 1)
@@ -508,7 +512,7 @@ if runSignalEngine and samples > 0
             if newLtfBear
                 float zTop = ltfTopNow
                 float zBottom = ltfBottomNow
-                box b = is15m ? box.new(left = sampleTime, xloc = xloc.bar_time, top = zTop, right = sampleCloseTime, bottom = zBottom, extend = extend.right, bgcolor = ltfBearColor, border_color = color.new(color.orange, 45), text = "15m 空 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top) : na
+                box b = is15m and showFvgOverlay ? box.new(left = sampleTime, xloc = xloc.bar_time, top = zTop, right = sampleCloseTime, bottom = zBottom, extend = extend.right, bgcolor = ltfBearColor, border_color = color.new(color.orange, 45), text = "15m 空 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top) : na
                 array.push(ltfTop, zTop)
                 array.push(ltfBottom, zBottom)
                 array.push(ltfDir, -1)
@@ -527,7 +531,7 @@ if runSignalEngine and samples > 0
                                 bool blocked = not f_direction_allowed(oppositeVeto, array.get(htfOppositeSeen, hi))
                                 [hasOverlap, oBottom, oTop] = f_overlap(array.get(htfBottom, hi), array.get(htfTop, hi), zBottom, zTop)
                                 if not blocked and hasOverlap
-                                    box ob = is15m ? box.new(left = sampleTime, xloc = xloc.bar_time, top = oTop, right = sampleCloseTime, bottom = oBottom, extend = extend.right, bgcolor = overlapBearColor, border_color = color.new(color.fuchsia, 10), border_width = 2, text = "空｜重度流動性", text_color = chart.fg_color, text_size = zoneTextSize, text_formatting = text.format_bold, text_halign = text.align_right, text_valign = text.align_top) : na
+                                    box ob = is15m and showFvgOverlay ? box.new(left = sampleTime, xloc = xloc.bar_time, top = oTop, right = sampleCloseTime, bottom = oBottom, extend = extend.right, bgcolor = overlapBearColor, border_color = color.new(color.fuchsia, 10), border_width = 2, text = "空｜重度流動性", text_color = chart.fg_color, text_size = zoneTextSize, text_formatting = text.format_bold, text_halign = text.align_right, text_valign = text.align_top) : na
                                     array.push(ovTop, oTop)
                                     array.push(ovBottom, oBottom)
                                     array.push(ovDir, -1)
@@ -642,7 +646,7 @@ if runSignalEngine and samples > 0
                                 array.push(keyCompletedHtfIds, array.get(ovHtfId, i))
                                 keyEvents += 1
                                 int source = array.get(ovHtfId, i)
-                                if is15m and f_sim_can_enter(source, usedTradeSources, strategy.position_size, entryPending)
+                                if is15m and f_sim_can_enter(source, usedTradeSources, strategy.position_size, entryPending, d, tradeSide)
                                     bool preferred = na(selectedOverlap)
                                     if not preferred
                                         preferred := f_precedes(d, (array.get(ovBottom, i) + array.get(ovTop, i)) / 2, array.get(ovId, i), (array.get(ovBottom, selectedOverlap) + array.get(ovTop, selectedOverlap)) / 2, array.get(ovId, selectedOverlap))
@@ -677,9 +681,9 @@ if runSignalEngine and samples > 0
 
             // Preserve first touch even if that same eligible candle also becomes the key.
             // One label per direction/candle avoids stacking several labels at the same price.
-            if is15m and showFvgEvents and bullEvents != ""
+            if is15m and showFvgOverlay and showFvgEvents and bullEvents != ""
                 label.new(sampleTime, sampleLow, bullEvents, style=label.style_label_up, color=bullKey ? color.yellow : color.new(color.aqua, 15), xloc=xloc.bar_time, textcolor=color.black, size=eventTextSize, text_formatting=text.format_bold, textalign=text.align_left)
-            if is15m and showFvgEvents and bearEvents != ""
+            if is15m and showFvgOverlay and showFvgEvents and bearEvents != ""
                 label.new(sampleTime, sampleHigh, bearEvents, style=label.style_label_down, color=bearKey ? color.yellow : color.new(color.orange, 15), xloc=xloc.bar_time, textcolor=color.black, size=eventTextSize, text_formatting=text.format_bold, textalign=text.align_left)
 
             // Only a confirmed source with an active child setup is a locked HTF FVG.
@@ -750,9 +754,9 @@ if runSignalEngine and samples > 0
             //------------------------------------------------------------------------------
 
             // plotshape text has a fixed font size; labels keep F+/F- readable with the zone font.
-            if is15m and showFvgEvents and newLtfBull
+            if is15m and showFvgOverlay and showFvgEvents and newLtfBull
                 label.new(sampleTime, sampleLow, "F+", yloc=yloc.belowbar, style=label.style_none, xloc=xloc.bar_time, textcolor=color.aqua, size=zoneTextSize)
-            if is15m and showFvgEvents and newLtfBear
+            if is15m and showFvgOverlay and showFvgEvents and newLtfBear
                 label.new(sampleTime, sampleHigh, "F-", yloc=yloc.abovebar, style=label.style_none, xloc=xloc.bar_time, textcolor=color.orange, size=zoneTextSize)
 
             if sampleConfirmed
@@ -761,7 +765,7 @@ if runSignalEngine and samples > 0
 
 if is15m and runSignalEngine and not na(selectedOverlap)
     int sourceId = array.get(ovHtfId, selectedOverlap)
-    if f_sim_can_enter(sourceId, usedTradeSources, strategy.position_size, entryPending)
+    if f_sim_can_enter(sourceId, usedTradeSources, strategy.position_size, entryPending, array.get(ovDir, selectedOverlap), tradeSide)
         activeDirection := array.get(ovDir, selectedOverlap)
         activeStop := f_sim_stop(activeDirection, array.get(ovHtfBottom, selectedOverlap), array.get(ovHtfTop, selectedOverlap), stopBufferPct, syminfo.mintick)
         activeTarget := na
@@ -782,7 +786,7 @@ if barstate.islast or barstate.islastconfirmedhistory
     while array.size(failureBoxes) > 0
         box.delete(array.pop(failureBoxes))
     array<int> drawnFailureSources = array.new<int>()
-    if array.size(failureHtfIds) > 0
+    if showFvgOverlay and array.size(failureHtfIds) > 0
         for offset = 0 to array.size(failureHtfIds) - 1
             int logIndex = array.size(failureHtfIds) - 1 - offset
             int sourceId = array.get(failureHtfIds, logIndex)
@@ -797,7 +801,7 @@ if barstate.islast or barstate.islastconfirmedhistory
                 array.push(failureBoxes, archived)
                 array.push(drawnFailureSources, sourceId)
     table.clear(failureTable, 0, 0, 4, 10)
-    if showFailureLog
+    if showFvgOverlay and showFailureLog
         table.cell(failureTable, 0, 0, "失效時間（商品時區）", text_color = color.white, bgcolor = color.new(color.blue, 45), text_size = size.small, text_formatting = text.format_bold)
         table.cell(failureTable, 1, 0, "事件", text_color = color.white, bgcolor = color.new(color.blue, 45), text_size = size.small, text_formatting = text.format_bold)
         table.cell(failureTable, 2, 0, "來源 1H FVG", text_color = color.white, bgcolor = color.new(color.blue, 45), text_size = size.small, text_formatting = text.format_bold)
@@ -817,13 +821,13 @@ if barstate.islast or barstate.islastconfirmedhistory
                 table.cell(failureTable, 4, row + 1, array.get(failureReasons, logIndex), text_color = chart.fg_color, bgcolor = rowColor, text_size = size.small)
 
 // 15m details are never drawn on the 1H overview.
-plotshape(is15m and bullFormation, title = "15m 看漲 FVG 形成", style = shape.circle, location = location.belowbar, color = color.new(color.aqua, 30), size = size.tiny, display = display.pane)
-plotshape(is15m and bearFormation, title = "15m 看跌 FVG 形成", style = shape.circle, location = location.abovebar, color = color.new(color.orange, 30), size = size.tiny, display = display.pane)
+plotshape(is15m and showFvgOverlay and bullFormation, title = "15m 看漲 FVG 形成", style = shape.circle, location = location.belowbar, color = color.new(color.aqua, 30), size = size.tiny, display = display.pane)
+plotshape(is15m and showFvgOverlay and bearFormation, title = "15m 看跌 FVG 形成", style = shape.circle, location = location.abovebar, color = color.new(color.orange, 30), size = size.tiny, display = display.pane)
 // Independent Style controls stay usable when Graphic objects > Pane labels is off.
 // Zero offset anchors each arrow and candle color to the actual confirming 15m bar.
-plotshape(is15m and bullKeyBar, title = "多方關鍵 K 箭頭", style = shape.triangleup, location = location.belowbar, color = color.rgb(33, 150, 243), size = size.small, offset = 0, display = display.pane)
-plotshape(is15m and bearKeyBar, title = "空方關鍵 K 箭頭", style = shape.triangledown, location = location.abovebar, color = color.rgb(255, 152, 0), size = size.small, offset = 0, display = display.pane)
-barcolor(is15m ? (bullKeyBar ? color.rgb(33, 150, 243) : bearKeyBar ? color.rgb(255, 152, 0) : na) : na, title = "關鍵 K 棒色", offset = 0)
+plotshape(is15m and showFvgOverlay and bullKeyBar, title = "多方關鍵 K 箭頭", style = shape.triangleup, location = location.belowbar, color = color.rgb(33, 150, 243), size = size.small, offset = 0, display = display.pane)
+plotshape(is15m and showFvgOverlay and bearKeyBar, title = "空方關鍵 K 箭頭", style = shape.triangledown, location = location.abovebar, color = color.rgb(255, 152, 0), size = size.small, offset = 0, display = display.pane)
+barcolor(is15m and showFvgOverlay ? (bullKeyBar ? color.rgb(33, 150, 243) : bearKeyBar ? color.rgb(255, 152, 0) : na) : na, title = "關鍵 K 棒色", offset = 0)
 
 // Reconciliation fields: visible in Data Window; they do not affect price scaling.
 plot(is15m ? (newConfirmedHtf ? htfBottomNow : na) : na, "1H 新確認 FVG 下界", display=display.data_window)

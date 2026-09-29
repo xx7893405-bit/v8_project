@@ -1,5 +1,9 @@
 # Project State
 
+## 此 checkout 的 FVG 多空獨立里程碑（2026-09-29）
+
+Issue #202；`codex/fvg-confluence-tv-dual` 以 `c0d7e2b` 為基準，交付同圖「僅做多／僅做空」兩個原生策略實例，各最多一筆、每来源一次；兩邊資金與報表獨立。23 項 Pine 契約通過，原單倉可見七筆已平倉對照一致，09-25 多空同持與 1H 概覽已核對。驗證與限制见 `docs/FVG_CONFLUENCE_DUAL_1A.md`。未跑正式 V8 回測／實盤／推送；原版保留。
+
 ## 此 checkout 的 FVG 模擬版里程碑（2026-09-29）
 
 `codex/fvg-confluence-tv-sim` 從 `6ec5ac9` 新增独立原生模擬策略，規格 #200／實作 #201；每個來源一次、全策略單筆，SL 邊界緩衝與實際成交價 2R。14 項原生契約與兩筆成交時序測試通過，BTCUSDT 15m 的 SL／TP 標記及 1H 模式已看圖核對。原視覺指標 SHA 不變；證據、限制與回復基準見 `docs/FVG_CONFLUENCE_SIM_1A.md`。不代表全專案回測或實盤驗收。

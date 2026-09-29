@@ -1,3 +1,5 @@
+> 本文件保存 `c0d7e2b` 的單倉歷史驗收；多空各一筆新版見 [FVG_CONFLUENCE_DUAL_1A.md](FVG_CONFLUENCE_DUAL_1A.md)。
+
 # FVG 共振 1.0A：TradingView 模擬交易版
 
 規格 [#200](https://github.com/xx7893405-bit/v8_project/issues/200)，已核准單票 [#201](https://github.com/xx7893405-bit/v8_project/issues/201)。分支 `codex/fvg-confluence-tv-sim`，來源基準 `6ec5ac9`。原 `fvg_confluence_visual_1a.pine` 保留不變，新檔為 `tradingview/fvg_confluence_strategy_1a.pine`。
