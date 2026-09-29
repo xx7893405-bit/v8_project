@@ -6,6 +6,10 @@ f_dash_assert(bool ok, string message) =>
 
 var int dashboardTestsPassed = 0
 if barstate.isfirst
+    dashboardTestsPassed += f_dash_assert(f_dashboard_include(false, 200, 100), "disabled date filter")
+    dashboardTestsPassed += f_dash_assert(not f_dashboard_include(true, 200, 199), "exclude exit before start")
+    dashboardTestsPassed += f_dash_assert(f_dashboard_include(true, 200, 200), "include exact start")
+    dashboardTestsPassed += f_dash_assert(f_dashboard_include(true, 200, 201), "include later exit")
     array<float> p = array.new<float>()
     array<float> r = array.new<float>()
     array<int> k = array.new<int>()

@@ -39,6 +39,8 @@ bool requireOverlapTouch = input.bool(true, "需先觸碰重疊區才開始觀�
 bool showTradeDashboard = input.bool(true, "顯示交易統計儀表板", group="儀表板", tooltip="統計筆數沿用『保留最近已出場交易圖形』，只計本實例已出場交易；未平倉損益另列。手續費與滑價沿用策略屬性，不包含未設定的成本或資金費率。")
 string dashboardLocation = input.string("自動", "儀表板位置", options=["自動", "左下", "右下", "左上", "右上"], group="儀表板", tooltip="自動：多方在左下、空方在右下，兩份實例不互相覆蓋。")
 int dashboardTextSize = input.int(14, "儀表板字體大小", minval=10, maxval=24, group="儀表板")
+bool dashboardUseStart = input.bool(false, "啟用統計開始日期", group="儀表板", tooltip="只篩選儀表板：出場時間大於或等於指定時間，再取最近 N 筆。原交易計算、暖機、進出場與交易圖形不變；不能額外取得 TV 未載入的歷史資料。")
+int dashboardStart = input.time(timestamp("01 Jan 2026 00:00 +0800"), "統計開始日期（按出場時間）", group="儀表板", tooltip="日期選擇器依圖表時區顯示；儀表板日期統一顯示 UTC+8。包含恰好在起點出場的交易；即使進場早於起點，也會納入。")
 
 // Drawing gates only: opposite-direction state still participates in signal rules.
 f_display_side(int direction) =>
@@ -897,6 +899,9 @@ plot(is15m ? array.size(usedTradeSources) : na, "已使用 1H FVG 數", display=
 plot(is15m ? closed15mCount : na, "已處理 15m 收盤數", display=display.data_window)
 
 // BEGIN DASHBOARD FUNCTIONS
+f_dashboard_include(bool enabled, int startTime, int exitTime) =>
+    not enabled or exitTime >= startTime
+
 // Exit reason and profit sign are different: a TP can lose after costs.
 f_dashboard_exit(string reason) =>
     reason == "TP" ? 1 : reason == "SL" or reason == "GAP SL" ? -1 : 0
@@ -952,14 +957,18 @@ string dashboardPosition = switch dashboardLocation
     "左上" => position.top_left
     "右上" => position.top_right
     => tradeSide == -1 ? position.bottom_right : position.bottom_left
-var table tradeDashboard = table.new(dashboardPosition, 2, 12, bgcolor=color.new(color.black, 12), frame_color=color.gray, frame_width=1, border_color=color.new(color.gray, 65), border_width=1)
+var table tradeDashboard = table.new(dashboardPosition, 2, 14, bgcolor=color.new(color.black, 12), frame_color=color.gray, frame_width=1, border_color=color.new(color.gray, 65), border_width=1)
+var int dashboardLoadedFrom = time
+var int dashboardLoadedTo = na
+if is15m and runSignalEngine
+    dashboardLoadedTo := time_close
 
 f_dashboard_row(int row, string caption, string value, color valueColor = color.white, string hint = "") =>
     table.cell(tradeDashboard, 0, row, caption, text_color=color.silver, text_size=dashboardTextSize, text_halign=text.align_left, tooltip=hint)
     table.cell(tradeDashboard, 1, row, value, text_color=valueColor, text_size=dashboardTextSize, text_halign=text.align_right, text_formatting=text.format_bold, tooltip=hint)
 
 if barstate.islast or barstate.islastconfirmedhistory
-    table.clear(tradeDashboard, 0, 0, 1, 11)
+    table.clear(tradeDashboard, 0, 0, 1, 13)
     if showTradeDashboard
         string sideTitle = tradeSide == 1 ? "多方" : tradeSide == -1 ? "空方" : "雙向單倉"
         if not is15m
@@ -973,6 +982,10 @@ if barstate.islast or barstate.islastconfirmedhistory
             int firstTrade = math.max(strategy.closedtrades.first_index, closedCount - visibleTrades)
             if closedCount > 0
                 for trade = firstTrade to closedCount - 1
+                    // Exit times are ordered, so earlier-than-last-N trades cannot
+                    // fill a newer start-date window. Keep the scan bounded to N.
+                    if not f_dashboard_include(dashboardUseStart, dashboardStart, strategy.closedtrades.exit_time(trade))
+                        continue
                     // TradingView closed-trade profit is already net of commission.
                     array.push(dashboardPnls, strategy.closedtrades.profit(trade))
                     array.push(dashboardFees, strategy.closedtrades.commission(trade))
@@ -992,8 +1005,8 @@ if barstate.islast or barstate.islastconfirmedhistory
             string moneyHint = "只計最近 N 筆已出場交易，沿用 TradingView 模擬成交、數量及已設定成本；手續費不重複扣除。未設定的手續費、滑價及資金費率不會自動補算。"
             string rHint = "R = 實際方向價差 ÷（實際進場價到初始 SL 的距離），未扣手續費。每筆金額風險可能不同，因此累計 R 正負不等於帳戶金額損益正負。無有效初始風險的交易排除 R，但仍計入筆數與淨損益。"
             color resultColor = n == 0 ? color.silver : net > 0 ? color.lime : net < 0 ? color.rgb(255, 100, 100) : color.silver
-            string verdict = n == 0 ? "尚無已出場交易" : net > 0 ? "正損益" : net < 0 ? "負損益" : "損益兩平"
-            f_dashboard_row(0, sideTitle + "｜已出場", str.tostring(n) + " / " + str.tostring(visibleTrades) + " 筆", color.aqua, "與『保留最近已出場交易圖形』共用 N；不足 N 筆就按實際可用筆數，未平倉交易不占名額。只統計此實例，兩份多空實例不合併資金。")
+            string verdict = n == 0 ? (dashboardUseStart ? "日期內無已出場交易" : "尚無已出場交易") : net > 0 ? "正損益" : net < 0 ? "負損益" : "損益兩平"
+            f_dashboard_row(0, sideTitle + "｜已出場", str.tostring(n) + " / " + str.tostring(visibleTrades) + " 筆", color.aqua, "與『保留最近已出場交易圖形』共用 N；啟用日期時先按出場時間篩選，再取最近 N 筆。不足 N 筆就按實際可用筆數，未平倉交易不占名額。只統計此實例，兩份多空實例不合併資金。")
             f_dashboard_row(1, "目前狀態", stateText, strategy.position_size != 0 ? color.aqua : observing > 0 ? color.yellow : color.white, "最新計算狀態，不是十字線位置的歷史狀態；持倉優先，其次待成交、觀察、等待觸碰、等待 FVG 共振。")
             f_dashboard_row(2, "TP / SL / 其他", str.tostring(tp) + " / " + str.tostring(sl) + " / " + str.tostring(other), color.white, "按實際出場原因分類；SL 包含 GAP SL。止盈次數不等於扣除成本後的獲利次數。")
             f_dashboard_row(3, "勝 / 負 / 平", str.tostring(wins) + " / " + str.tostring(losses) + " / " + str.tostring(flat), color.white, moneyHint)
@@ -1006,3 +1019,8 @@ if barstate.islast or barstate.islastconfirmedhistory
             f_dashboard_row(9, "已計手續費", str.tostring(commission, "#.####") + moneyUnit, color.silver, moneyHint)
             f_dashboard_row(10, "未平倉損益", strategy.position_size != 0 ? str.tostring(strategy.openprofit, "#.####") + moneyUnit : "無持倉", color.white, "另列目前浮動損益，不加入已出場統計。")
             f_dashboard_row(11, "此視窗結果", verdict, resultColor, "僅描述最近可用 N 筆的模擬結果；不代表未來 30 筆報酬。預設成本為零，請在屬性設定手續費與滑價。")
+            bool missingStartHistory = dashboardUseStart and dashboardStart < dashboardLoadedFrom
+            string startText = dashboardUseStart ? str.format_time(dashboardStart, "yyyy-MM-dd HH:mm", "UTC+8") + (missingStartHistory ? "\n起點早於已載入資料" : "") : "未限制日期"
+            f_dashboard_row(12, "統計起點（UTC+8）", startText, missingStartHistory ? color.yellow : color.silver, "以出場時間含起點篩選。若起點早於資料開頭，本表只涵蓋已載入部分，不能代表整段日期。")
+            string loadedText = str.format_time(dashboardLoadedFrom, "yyyy-MM-dd HH:mm", "UTC+8") + "\n→ " + (na(dashboardLoadedTo) ? "尚無已處理收盤" : str.format_time(dashboardLoadedTo, "yyyy-MM-dd HH:mm", "UTC+8"))
+            f_dashboard_row(13, "資料範圍（UTC+8）\n" + str.tostring(closed15mCount) + " 根已處理", loadedText, color.silver, "本實例最早載入 K 的開盤時間，到最後已處理 15m K 的收盤時間；不是目前螢幕可見範圍，也不是第一筆／最後一筆交易時間。")
