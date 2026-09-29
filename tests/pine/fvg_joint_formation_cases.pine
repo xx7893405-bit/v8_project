@@ -1,0 +1,22 @@
+// Same-close formation is separate from positive price overlap.
+var int jointPassed = 0
+if barstate.isfirst
+    [hd, hb, ht] = f_gap(150, 120, 100, 90)
+    [ld, lb, lt] = f_gap(150, 130, 128, 125)
+    [joint, jb, jt] = f_overlap(hb, ht, lb, lt)
+    jointPassed += f_release_expect(hd == 1 and ld == 1 and not joint, "both bullish FVGs confirm but prices do not overlap")
+    [pd, pb, pt] = f_gap(140, 125, 110, 100)
+    [paired, ob, ot] = f_overlap(hb, ht, pb, pt)
+    jointPassed += f_release_expect(paired and ob == 110 and ot == 120, "new hourly FVG immediately pairs existing 15m FVG")
+    [state, touched, body, wick] = f_step(0, int(na), hd, ob, ot, ht-hb, 12, 96, paired and f_htf_release(900, 840, 900, true, false, 840) == 1, true, 130, 150, 130, 149, 0.5, 0.2, false)
+    jointPassed += f_release_expect(state == 4, "same close pairs existing zone then evaluates final 15m key")
+    [shd, shb, sht] = f_gap(100, 70, 130, 120)
+    [sld, slb, slt] = f_gap(95, 70, 105, 98)
+    [sjoint, sjb, sjt] = f_overlap(shb, sht, slb, slt)
+    jointPassed += f_release_expect(shd == -1 and sld == -1 and not sjoint, "both bearish FVGs confirm but prices do not overlap")
+    [spd, spb, spt] = f_gap(95, 80, 120, 110)
+    [spaired, sob, sot] = f_overlap(shb, sht, spb, spt)
+    jointPassed += f_release_expect(spaired and sob == 100 and sot == 110, "new bearish hour immediately pairs existing 15m FVG")
+    [sstate, stouched, sbody, swick] = f_step(0, int(na), shd, sob, sot, sht-shb, 12, 96, spaired and f_htf_release(900, 840, 900, true, false, 840) == 1, true, 90, 95, 70, 71, 0.5, 0.2, false)
+    jointPassed += f_release_expect(sstate == 4, "same close bearish pair then key")
+plot(jointPassed, "Joint formation cases", display=display.status_line)

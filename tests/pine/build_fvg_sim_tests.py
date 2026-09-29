@@ -33,10 +33,11 @@ def main():
         fixture = ('//@version=6\nindicator("FVG Same Close Tests", overlay=true)\n'
                    + extract(text, "HTF RELEASE FUNCTIONS") + "\n"
                    + extract(text, "CONTRACT FUNCTIONS") + "\n"
-                   + Path(__file__).with_name("fvg_same_close_contract_cases.pine").read_text())
+                   + Path(__file__).with_name("fvg_same_close_contract_cases.pine").read_text() + "\n"
+                   + Path(__file__).with_name("fvg_joint_formation_cases.pine").read_text())
     args.output.write_text(fixture)
     print(json.dumps({"fixture": str(args.output), "sha256": hashlib.sha256(fixture.encode()).hexdigest(),
-                      "assertions": fixture.count("passed += f_assert") + fixture.count("obsPassed +=") + fixture.count("releasePassed +="), "execution": "not run; use TradingView"}))
+                      "assertions": fixture.count("passed += f_assert") + fixture.count("obsPassed +=") + fixture.count("releasePassed +=") + fixture.count("jointPassed +="), "execution": "not run; use TradingView"}))
 
 
 if __name__ == "__main__":

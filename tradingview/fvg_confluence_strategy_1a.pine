@@ -678,10 +678,11 @@ if runSignalEngine and samples > 0
                             ranksDirty := true
                             if not na(b)
                                 box.set_extend(b, extend.none)
-                                box.set_right(b, sampleTime)
+                                // A same-candle setup/key must retain the full confirmed candle width.
+                                box.set_right(b, sampleCloseTime)
                             string ending = state == 2 ? "收盤失效" : state == 3 ? "觀察過期" : state == 5 ? "等待過期" : "關鍵 K"
                             if not na(b)
-                                box.set_text(b, f_prefix(i) + "｜" + ending)
+                                box.set_text(b, f_prefix(i) + "\n重度流動性｜" + ending)
                                 box.set_bgcolor(b, state == 2 ? invalidColor : (state == 3 or state == 5) ? expiredColor : keyColor)
                             if state == 2
                                 invalidEvents += f_display_side(d) ? 1 : 0
