@@ -1,0 +1,53 @@
+// Native Pine cases, appended after production or extracted dashboard helpers.
+f_dash_assert(bool ok, string message) =>
+    if not ok
+        runtime.error("Dashboard: " + message)
+    1
+
+var int dashboardTestsPassed = 0
+if barstate.isfirst
+    array<float> p = array.new<float>()
+    array<float> r = array.new<float>()
+    array<int> k = array.new<int>()
+    array<float> c = array.new<float>()
+    [n0, tp0, sl0, o0, w0, l0, f0, net0, g0, loss0, rs0, rc0, fee0] = f_dashboard_totals(p, r, k, c, 30)
+    dashboardTestsPassed += f_dash_assert(n0 == 0 and net0 == 0 and rc0 == 0, "empty sample")
+    for i = 0 to 29
+        array.push(p, i < 12 ? 2.0 : -1.0)
+        array.push(r, i < 12 ? 2.0 : -1.0)
+        array.push(k, i < 12 ? 1 : -1)
+        array.push(c, 0.1)
+    [n, tp, sl, other, wins, losses, flat, net, gains, lossAmount, sumR, rCount, fees] = f_dashboard_totals(p, r, k, c, 30)
+    dashboardTestsPassed += f_dash_assert(n == 30 and tp == 12 and sl == 18 and other == 0, "30 trade exit counts")
+    dashboardTestsPassed += f_dash_assert(wins == 12 and losses == 18 and flat == 0 and net == 6, "30 trade signs/net")
+    dashboardTestsPassed += f_dash_assert(gains == 24 and lossAmount == 18 and sumR == 6 and rCount == 30, "PF and R totals")
+    dashboardTestsPassed += f_dash_assert(math.abs(fees - 3) < 1e-9, "fees counted once as information")
+    [n10, tp10, sl10, o10, w10, l10, f10, net10, g10, loss10, rs10, rc10, fee10] = f_dashboard_totals(p, r, k, c, 10)
+    dashboardTestsPassed += f_dash_assert(n10 == 10 and sl10 == 10 and tp10 == 0 and net10 == -10 and rs10 == -10, "rolling latest N")
+    [n60, tp60, sl60, o60, w60, l60, f60, net60, g60, loss60, rs60, rc60, fee60] = f_dashboard_totals(p, r, k, c, 60)
+    dashboardTestsPassed += f_dash_assert(n60 == 30 and net60 == 6, "fewer than requested N")
+    [nx, tpx, slx, ox, wx, lx, fx, netx, gx, lossx, rsx, rcx, feex] = f_dashboard_totals(array.from(-0.2, 0.0, -1.0), array.from(2.0, float(na), -1.0), array.from(1, 0, -1), array.from(2.2, 0.0, 0.0), 30)
+    dashboardTestsPassed += f_dash_assert(nx == 3 and tpx == 1 and slx == 1 and ox == 1 and wx == 0 and lx == 2 and fx == 1, "TP reason differs from net win")
+    dashboardTestsPassed += f_dash_assert(math.abs(netx + 1.2) < 1e-9 and rcx == 2 and rsx == 1 and feex == 2.2, "missing R and commission not subtracted twice")
+    dashboardTestsPassed += f_dash_assert(f_dashboard_exit("TP") == 1 and f_dashboard_exit("SL") == -1 and f_dashboard_exit("GAP SL") == -1 and f_dashboard_exit("Margin call") == 0, "exit categories")
+    dashboardTestsPassed += f_dash_assert(f_dashboard_r(1, 100, 90, 120) == 2 and f_dashboard_r(-1, 100, 110, 80) == 2, "symmetric actual fill R")
+    dashboardTestsPassed += f_dash_assert(f_dashboard_r(1, 100, 90, 85) == -1.5 and na(f_dashboard_r(1, 89, 90, 88)) and na(f_dashboard_r(1, 100, float(na), 110)), "gap loss and undefined risk")
+    dashboardTestsPassed += f_dash_assert(f_dashboard_status(1, true, 2, 3, true) == "進行中｜多單" and f_dashboard_status(-1, false, 0, 0, true) == "進行中｜空單", "position priority")
+    dashboardTestsPassed += f_dash_assert(f_dashboard_status(0, true, 2, 3, true) == "關鍵 K 已確認｜待成交", "pending priority")
+    dashboardTestsPassed += f_dash_assert(f_dashboard_status(0, false, 2, 3, true) == "觀察中｜2 區", "observation priority")
+    dashboardTestsPassed += f_dash_assert(f_dashboard_status(0, false, 0, 3, true) == "等待觸碰｜3 區" and f_dashboard_status(0, false, 0, 3, false) == "等待收盤觀察｜3 區", "touch modes")
+    dashboardTestsPassed += f_dash_assert(f_dashboard_status(0, false, 0, 0, true) == "等待 FVG 共振", "idle status")
+
+// Bounded native reconciliation on the same-currency chart, with nonzero
+// commission tested through Properties. This is not a strategy backtest suite.
+if is15m and (barstate.islast or barstate.islastconfirmedhistory)
+    float ledgerSum = 0.0
+    if strategy.closedtrades > 0 and strategy.closedtrades <= 60
+        for i = 0 to strategy.closedtrades - 1
+            float cashFromFills = (strategy.closedtrades.exit_price(i) - strategy.closedtrades.entry_price(i)) * strategy.closedtrades.size(i) * syminfo.pointvalue - strategy.closedtrades.commission(i)
+            if math.abs(cashFromFills - strategy.closedtrades.profit(i)) > 1e-7
+                runtime.error("Dashboard: broker profit/commission mismatch")
+            ledgerSum += strategy.closedtrades.profit(i)
+        if math.abs(ledgerSum - strategy.netprofit) > 1e-7
+            runtime.error("Dashboard: netprofit ledger mismatch")
+    f_dashboard_row(11, "NATIVE TESTS", "PASS " + str.tostring(dashboardTestsPassed), color.lime)

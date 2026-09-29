@@ -36,6 +36,9 @@ bool showFvgEvents = input.bool(false, "顯示首次進區／失效／關鍵 K �
 bool showFailureLog = input.bool(false, "顯示最近十筆失效明細表", group="顯示")
 // Append new inputs to preserve existing instance input IDs.
 bool requireOverlapTouch = input.bool(true, "需先觸碰重疊區才開始觀察", group="觀察", tooltip="開啟：首次碰到重疊區才起算觀察。關閉：從重疊區可判定後的第一根已收盤 15m K 起算；仍受觀察期限及收盤失效限制。切換會重算歷史，較早的關鍵 K 可能先消耗來源。")
+bool showTradeDashboard = input.bool(true, "顯示交易統計儀表板", group="儀表板", tooltip="統計筆數沿用『保留最近已出場交易圖形』，只計本實例已出場交易；未平倉損益另列。手續費與滑價沿用策略屬性，不包含未設定的成本或資金費率。")
+string dashboardLocation = input.string("自動", "儀表板位置", options=["自動", "左下", "右下", "左上", "右上"], group="儀表板", tooltip="自動：多方在左下、空方在右下，兩份實例不互相覆蓋。")
+int dashboardTextSize = input.int(14, "儀表板字體大小", minval=10, maxval=24, group="儀表板")
 
 // Drawing gates only: opposite-direction state still participates in signal rules.
 f_display_side(int direction) =>
@@ -892,3 +895,114 @@ plot(is15m and strategy.position_size != 0 ? activeStop : na, "持倉 SL 核對"
 plot(is15m and strategy.position_size != 0 ? activeTarget : na, "持倉 TP 核對", display=display.data_window)
 plot(is15m ? array.size(usedTradeSources) : na, "已使用 1H FVG 數", display=display.data_window)
 plot(is15m ? closed15mCount : na, "已處理 15m 收盤數", display=display.data_window)
+
+// BEGIN DASHBOARD FUNCTIONS
+// Exit reason and profit sign are different: a TP can lose after costs.
+f_dashboard_exit(string reason) =>
+    reason == "TP" ? 1 : reason == "SL" or reason == "GAP SL" ? -1 : 0
+
+// Price R uses the actual fill and frozen initial stop; it excludes commission.
+// GAP SL with non-positive initial risk has no meaningful R denominator.
+f_dashboard_r(int direction, float entry, float stop, float exitPrice) =>
+    float risk = direction * (entry - stop)
+    not na(risk) and risk > 0 ? direction * (exitPrice - entry) / risk : na
+
+f_dashboard_status(float positionSize, bool pending, int observing, int waiting, bool requireTouch) =>
+    positionSize != 0 ? (positionSize > 0 ? "進行中｜多單" : "進行中｜空單") : pending ? "關鍵 K 已確認｜待成交" : observing > 0 ? "觀察中｜" + str.tostring(observing) + " 區" : waiting > 0 ? (requireTouch ? "等待觸碰｜" : "等待收盤觀察｜") + str.tostring(waiting) + " 區" : "等待 FVG 共振"
+
+// Pure rolling aggregation, ordered oldest to newest. Empty/missing R stays N/A.
+f_dashboard_totals(array<float> pnls, array<float> rs, array<int> kinds, array<float> fees, int limit) =>
+    int n = math.min(array.size(pnls), math.max(0, limit))
+    int tp = 0
+    int sl = 0
+    int other = 0
+    int wins = 0
+    int losses = 0
+    int flat = 0
+    int rCount = 0
+    float net = 0.0
+    float gains = 0.0
+    float lossAmount = 0.0
+    float sumR = 0.0
+    float commission = 0.0
+    if n > 0
+        for i = array.size(pnls) - n to array.size(pnls) - 1
+            float pnl = array.get(pnls, i)
+            int kind = array.get(kinds, i)
+            tp += kind == 1 ? 1 : 0
+            sl += kind == -1 ? 1 : 0
+            other += kind == 0 ? 1 : 0
+            wins += pnl > 0 ? 1 : 0
+            losses += pnl < 0 ? 1 : 0
+            flat += pnl == 0 ? 1 : 0
+            net += pnl
+            gains += math.max(pnl, 0)
+            lossAmount += math.max(-pnl, 0)
+            commission += array.get(fees, i)
+            float r = array.get(rs, i)
+            if not na(r)
+                sumR += r
+                rCount += 1
+    [n, tp, sl, other, wins, losses, flat, net, gains, lossAmount, sumR, rCount, commission]
+// END DASHBOARD FUNCTIONS
+
+string dashboardPosition = switch dashboardLocation
+    "左下" => position.bottom_left
+    "右下" => position.bottom_right
+    "左上" => position.top_left
+    "右上" => position.top_right
+    => tradeSide == -1 ? position.bottom_right : position.bottom_left
+var table tradeDashboard = table.new(dashboardPosition, 2, 12, bgcolor=color.new(color.black, 12), frame_color=color.gray, frame_width=1, border_color=color.new(color.gray, 65), border_width=1)
+
+f_dashboard_row(int row, string caption, string value, color valueColor = color.white, string hint = "") =>
+    table.cell(tradeDashboard, 0, row, caption, text_color=color.silver, text_size=dashboardTextSize, text_halign=text.align_left, tooltip=hint)
+    table.cell(tradeDashboard, 1, row, value, text_color=valueColor, text_size=dashboardTextSize, text_halign=text.align_right, text_formatting=text.format_bold, tooltip=hint)
+
+if barstate.islast or barstate.islastconfirmedhistory
+    table.clear(tradeDashboard, 0, 0, 1, 11)
+    if showTradeDashboard
+        string sideTitle = tradeSide == 1 ? "多方" : tradeSide == -1 ? "空方" : "雙向單倉"
+        if not is15m
+            f_dashboard_row(0, sideTitle + "儀表板", "請切至 15m", color.yellow, "1H 僅顯示 FVG 概覽；交易統計與狀態以 15m 實例為準。")
+        else
+            array<float> dashboardPnls = array.new<float>()
+            array<float> dashboardRs = array.new<float>()
+            array<int> dashboardKinds = array.new<int>()
+            array<float> dashboardFees = array.new<float>()
+            int closedCount = strategy.closedtrades
+            int firstTrade = math.max(strategy.closedtrades.first_index, closedCount - visibleTrades)
+            if closedCount > 0
+                for trade = firstTrade to closedCount - 1
+                    // TradingView closed-trade profit is already net of commission.
+                    array.push(dashboardPnls, strategy.closedtrades.profit(trade))
+                    array.push(dashboardFees, strategy.closedtrades.commission(trade))
+                    array.push(dashboardKinds, f_dashboard_exit(strategy.closedtrades.exit_comment(trade)))
+                    string id = strategy.closedtrades.entry_id(trade)
+                    array.push(dashboardRs, f_dashboard_r(strategy.closedtrades.size(trade) > 0 ? 1 : -1, strategy.closedtrades.entry_price(trade), map.get(tradeStops, id), strategy.closedtrades.exit_price(trade)))
+            [n, tp, sl, other, wins, losses, flat, net, gains, lossAmount, sumR, rCount, commission] = f_dashboard_totals(dashboardPnls, dashboardRs, dashboardKinds, dashboardFees, visibleTrades)
+            int observing = 0
+            int waiting = 0
+            if array.size(ovState) > 0
+                for i = 0 to array.size(ovState) - 1
+                    if f_display_side(array.get(ovDir, i)) and not array.includes(usedTradeSources, array.get(ovHtfId, i))
+                        observing += array.get(ovState, i) == 1 ? 1 : 0
+                        waiting += array.get(ovState, i) == 0 ? 1 : 0
+            string stateText = f_dashboard_status(strategy.position_size, entryPending, observing, waiting, requireOverlapTouch)
+            string moneyUnit = " " + strategy.account_currency
+            string moneyHint = "只計最近 N 筆已出場交易，沿用 TradingView 模擬成交、數量及已設定成本；手續費不重複扣除。未設定的手續費、滑價及資金費率不會自動補算。"
+            string rHint = "R = 實際方向價差 ÷（實際進場價到初始 SL 的距離），未扣手續費。每筆金額風險可能不同，因此累計 R 正負不等於帳戶金額損益正負。無有效初始風險的交易排除 R，但仍計入筆數與淨損益。"
+            color resultColor = n == 0 ? color.silver : net > 0 ? color.lime : net < 0 ? color.rgb(255, 100, 100) : color.silver
+            string verdict = n == 0 ? "尚無已出場交易" : net > 0 ? "正損益" : net < 0 ? "負損益" : "損益兩平"
+            f_dashboard_row(0, sideTitle + "｜已出場", str.tostring(n) + " / " + str.tostring(visibleTrades) + " 筆", color.aqua, "與『保留最近已出場交易圖形』共用 N；不足 N 筆就按實際可用筆數，未平倉交易不占名額。只統計此實例，兩份多空實例不合併資金。")
+            f_dashboard_row(1, "目前狀態", stateText, strategy.position_size != 0 ? color.aqua : observing > 0 ? color.yellow : color.white, "最新計算狀態，不是十字線位置的歷史狀態；持倉優先，其次待成交、觀察、等待觸碰、等待 FVG 共振。")
+            f_dashboard_row(2, "TP / SL / 其他", str.tostring(tp) + " / " + str.tostring(sl) + " / " + str.tostring(other), color.white, "按實際出場原因分類；SL 包含 GAP SL。止盈次數不等於扣除成本後的獲利次數。")
+            f_dashboard_row(3, "勝 / 負 / 平", str.tostring(wins) + " / " + str.tostring(losses) + " / " + str.tostring(flat), color.white, moneyHint)
+            f_dashboard_row(4, "勝率", n > 0 ? str.tostring(100.0 * wins / n, "#.0") + "%" : "—", color.white, "淨損益 > 0 的筆數 ÷ 實際已出場筆數；兩平也計入分母。")
+            f_dashboard_row(5, "模擬淨損益", n > 0 ? str.tostring(net, "#.####") + moneyUnit : "—", resultColor, moneyHint)
+            f_dashboard_row(6, "平均每筆損益", n > 0 ? str.tostring(net / n, "#.####") + moneyUnit : "—", resultColor, moneyHint)
+            string pfText = lossAmount > 0 ? str.tostring(gains / lossAmount, "#.####") : gains > 0 ? "∞（無虧損）" : "—"
+            f_dashboard_row(7, "獲利因子 PF", pfText, color.white, "獲利交易淨損益合計 ÷ 虧損交易淨損益絕對值合計。> 1 代表此視窗金額獲利多於虧損；不是未來績效保證。")
+            f_dashboard_row(8, "累計 R（價差）", rCount > 0 ? str.tostring(sumR, "#.##") + "R · " + str.tostring(rCount) + "/" + str.tostring(n) + " 筆" : "—", color.white, rHint)
+            f_dashboard_row(9, "已計手續費", str.tostring(commission, "#.####") + moneyUnit, color.silver, moneyHint)
+            f_dashboard_row(10, "未平倉損益", strategy.position_size != 0 ? str.tostring(strategy.openprofit, "#.####") + moneyUnit : "無持倉", color.white, "另列目前浮動損益，不加入已出場統計。")
+            f_dashboard_row(11, "此視窗結果", verdict, resultColor, "僅描述最近可用 N 筆的模擬結果；不代表未來 30 筆報酬。預設成本為零，請在屬性設定手續費與滑價。")
