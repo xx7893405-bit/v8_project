@@ -1,5 +1,9 @@
 # Project State
 
+## 此 checkout 的 FVG 觸碰開關里程碑（2026-09-29）
+
+Issue #203；`codex/fvg-confluence-touch-option` 基準 `20a7a42`，新增預設開啟的首次觸碰要求。關閉自 eligible 確認棒開始 96 根觀察；其他時序與交易契約保留。原生 22 項斷言與 640 組 ON 基準對照通過，TV v4 兩份實例已切換驗證並還原 ON。證據與限制見 `docs/FVG_CONFLUENCE_TOUCH_OPTION_1A.md`；未跑正式 V8 回測或 push。
+
 ## 此 checkout 的 FVG 多空獨立里程碑（2026-09-29）
 
 Issue #202；`codex/fvg-confluence-tv-dual` 以 `c0d7e2b` 為基準，交付同圖「僅做多／僅做空」兩個原生策略實例，各最多一筆、每来源一次；兩邊資金與報表獨立。23 項 Pine 契約通過，原單倉可見七筆已平倉對照一致，09-25 多空同持與 1H 概覽已核對。驗證與限制见 `docs/FVG_CONFLUENCE_DUAL_1A.md`。未跑正式 V8 回測／實盤／推送；原版保留。

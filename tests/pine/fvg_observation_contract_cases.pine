@@ -1,0 +1,77 @@
+// Frozen 20a7a42 observation transition for default-ON compatibility checks.
+f_frozen_step(int state, int touchedAt, int direction, float bottom, float top, float htfWidth, int n, int window, bool eligible, bool confirmed, float o, float h, float l, float c, float displacement, float wickLimit) =>
+    int nextState = state
+    int nextTouch = touchedAt
+    float bodyRatio = htfWidth > 0 ? math.abs(c - o) / htfWidth : na
+    float wickRatio = h > l ? (direction == 1 ? h - c : c - l) / (h - l) : na
+    if confirmed and (state == 0 or state == 1)
+        bool invalid = direction == 1 ? c < bottom : c > top
+        if invalid
+            nextState := 2
+        else
+            if state == 0 and eligible and l <= top and h >= bottom
+                nextState := 1
+                nextTouch := n
+            if nextState == 1
+                int observed = n - nextTouch + 1
+                bool inWindow = observed <= window
+                bool correctDirection = direction == 1 ? c > o : c < o
+                bool key = inWindow and correctDirection and bodyRatio >= displacement and wickRatio <= wickLimit
+                if key
+                    nextState := 4
+                else if observed >= window
+                    nextState := 3
+    [nextState, nextTouch, bodyRatio, wickRatio]
+
+f_check(bool ok, string name) =>
+    if not ok
+        runtime.error(name)
+    1
+f_obs_expect(int oldState, int at, int d, int n, int window, bool eligible, bool confirmed, float o, float h, float l, float c, bool needTouch, int wantState, int wantStart, string name) =>
+    [s, t, br, wr] = f_step(oldState, at, d, 100, 120, 100, n, window, eligible, confirmed, o, h, l, c, 0.5, 0.2, needTouch)
+    f_check(s == wantState and (na(wantStart) ? na(t) : t == wantStart), name)
+var int obsPassed = 0
+var int parityPassed = 0
+if barstate.isfirst
+    // Literal synthetic bounds/width; these do not assert the screenshot's actual source width.
+    [s, t, br, wr] = f_step(0, na, -1, 119.3, 119.4, 1, 100, 96, true, true, 118.980, 118.980, 118.027, 118.057, 0.5, 0.2, false)
+    obsPassed += f_check(s == 4 and t == 100, "OFF: strong short outside overlap becomes key")
+    obsPassed += f_obs_expect(0, na, 1, 100, 96, true, true, 130, 191, 129, 190, false, 4, 100, "OFF long outside overlap")
+    obsPassed += f_obs_expect(0, na, -1, 100, 96, true, true, 90, 91, 29, 30, false, 4, 100, "OFF short outside overlap")
+    obsPassed += f_obs_expect(0, na, 1, 100, 96, true, true, 130, 191, 129, 190, true, 0, na, "ON still waits for touch")
+    obsPassed += f_obs_expect(0, na, 1, 100, 96, false, true, 130, 191, 129, 190, false, 0, na, "OFF cannot start before eligibility")
+    obsPassed += f_obs_expect(0, na, 1, 100, 96, true, false, 130, 191, 129, 190, false, 0, na, "OFF cannot start on unconfirmed candle")
+    obsPassed += f_obs_expect(0, na, 1, 100, 96, true, true, 190, 191, 129, 130, false, 1, 100, "OFF rejects wrong direction")
+    obsPassed += f_obs_expect(0, na, 1, 100, 96, true, true, 130, 230, 129, 190, false, 1, 100, "OFF retains forward-wick limit")
+    obsPassed += f_obs_expect(0, na, 1, 100, 96, true, true, 130, 150, 129, 149, false, 1, 100, "OFF retains displacement limit")
+    obsPassed += f_obs_expect(0, na, 1, 100, 96, true, true, 40, 100, 39, 99, false, 2, na, "long close invalidation overrides activation")
+    obsPassed += f_obs_expect(0, na, -1, 100, 96, true, true, 180, 181, 120, 121, false, 2, na, "short close invalidation overrides activation")
+    obsPassed += f_obs_expect(0, na, 1, 100, 96, true, true, 130, 131, 129, 130, false, 1, 100, "OFF starts clock without key")
+    obsPassed += f_obs_expect(1, 100, 1, 120, 96, true, true, 110, 120, 100, 110, false, 1, 100, "later touch does not reset OFF clock")
+    obsPassed += f_obs_expect(1, 100, 1, 194, 96, true, true, 130, 131, 129, 130, false, 1, 100, "OFF candle 95 remains active")
+    obsPassed += f_obs_expect(1, 100, 1, 195, 96, true, true, 130, 131, 129, 130, false, 3, 100, "OFF expires at candle 96 close")
+    obsPassed += f_obs_expect(1, 100, 1, 195, 96, true, true, 130, 191, 129, 190, false, 4, 100, "OFF allows key on candle 96")
+    obsPassed += f_obs_expect(1, 100, 1, 196, 96, true, true, 130, 191, 129, 190, false, 3, 100, "OFF rejects key on candle 97")
+    obsPassed += f_obs_expect(0, na, 1, 100, 1, true, true, 130, 131, 129, 130, false, 3, 100, "OFF one-candle window expires")
+    obsPassed += f_obs_expect(0, na, 1, 100, 1, true, true, 130, 191, 129, 190, false, 4, 100, "OFF one-candle window accepts key")
+    obsPassed += f_obs_expect(2, 100, 1, 110, 96, true, true, 130, 191, 129, 190, false, 2, 100, "invalid source cannot revive")
+    obsPassed += f_obs_expect(3, 100, 1, 110, 96, true, true, 130, 191, 129, 190, false, 3, 100, "expired source cannot revive")
+    obsPassed += f_obs_expect(4, 100, 1, 110, 96, true, true, 130, 191, 129, 190, false, 4, 100, "completed key cannot repeat")
+    // A finite synthetic transition matrix, not a historical market backtest.
+    for state = 0 to 4
+        for dir in array.from(-1, 1)
+            for n in array.from(100, 194, 195, 196)
+                for eligible in array.from(false, true)
+                    for confirmed in array.from(false, true)
+                        for pattern = 0 to 3
+                            float o = pattern == 2 ? 130 : 110
+                            float h = pattern == 0 ? 171 : pattern == 1 ? 112 : pattern == 2 ? 131 : 120
+                            float l = pattern == 0 ? 108 : pattern == 1 ? 49 : pattern == 2 ? 129 : 100
+                            float c = pattern == 0 ? 170 : pattern == 1 ? 50 : pattern == 2 ? 130 : 110
+                            int at = state == 0 ? na : 100
+                            [baseState, baseStart, baseBody, baseWick] = f_frozen_step(state, at, dir, 100, 120, 100, n, 96, eligible, confirmed, o, h, l, c, 0.5, 0.2)
+                            [implicitState, implicitStart, implicitBody, implicitWick] = f_step(state, at, dir, 100, 120, 100, n, 96, eligible, confirmed, o, h, l, c, 0.5, 0.2)
+                            [onState, onStart, onBody, onWick] = f_step(state, at, dir, 100, 120, 100, n, 96, eligible, confirmed, o, h, l, c, 0.5, 0.2, true)
+                            parityPassed += f_check(baseState == onState and baseState == implicitState and (na(baseStart) ? na(onStart) and na(implicitStart) : baseStart == onStart and baseStart == implicitStart) and baseBody == onBody and baseBody == implicitBody and baseWick == onWick and baseWick == implicitWick, "ON/default differs from frozen baseline")
+plot(obsPassed, "Observation assertions passed", display=display.status_line + display.data_window)
+plot(parityPassed, "ON baseline cases passed", display=display.status_line + display.data_window)

@@ -1,0 +1,50 @@
+{
+  "issue": 203,
+  "baseline": "20a7a42",
+  "branch": "codex/fvg-confluence-touch-option",
+  "date": "2026-09-29",
+  "files": {
+    "tradingview/fvg_confluence_strategy_1a.pine": "ab06e16bcb35a3b55af85f71733e5f7bee597bdccce69d01a88d936f14456ec9",
+    "tests/pine/build_fvg_sim_tests.py": "ccf619ab69b1589fdc248d30963ddc19341447618ab9bda8f1d4d0dbcc9812cb",
+    "tests/pine/fvg_observation_contract_cases.pine": "0b109dd338e7ee346818aa57072f2b1fdd7cbe2c7bef0d39beb845fa1b352272",
+    "tradingview/fvg_confluence_visual_1a.pine": "8f8f47efd14aa51f85d673a9c5a8c6a207303172f82b30ddb283346c0b9c7411",
+    "docs/FVG_CONFLUENCE_TOUCH_OPTION_1A.md": "9339673ab87233f05a835934e094cbbfe963f21e97768d0230f8935adaa7c10e"
+  },
+  "observation_fixture_sha256": "0aa1bffdaa76273cadd884c9ef04d035d625563e71922fe914d400817f5b749a",
+  "native_observation_assertions_passed": 22,
+  "native_on_baseline_cases_passed": 640,
+  "tv_script": "V8 FVG 共振 1.0A｜多空獨立",
+  "tv_version": 4,
+  "chart": "https://www.tradingview.com/chart/WVcin0WD/",
+  "tv_source_chars": 59055,
+  "tv_source_fnv32": "c33ed778",
+  "instances": [
+    {
+      "direction": "long_only",
+      "require_overlap_touch": true,
+      "fvg_overlay": true
+    },
+    {
+      "direction": "short_only",
+      "require_overlap_touch": true,
+      "fvg_overlay": false
+    }
+  ],
+  "historical_visible_short_rows_parity": [
+    11,
+    10,
+    9,
+    8,
+    7,
+    6,
+    5
+  ],
+  "formal_v8_backtest": false,
+  "pushed": false,
+  "limitations": [
+    "Bounded native synthetic and UI validation only",
+    "Separate capital and reports",
+    "Recomputed realtime exit timestamp can become historical bar timestamp",
+    "No full market-data parity or long forward test"
+  ]
+}

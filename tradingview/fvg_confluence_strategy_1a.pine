@@ -1,6 +1,6 @@
 //@version=6
 strategy("V8 FVG 共振 1.0A｜多空獨立", overlay = true, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 300, pyramiding = 0, initial_capital = 100000, default_qty_type = strategy.fixed, default_qty_value = 0.001, margin_long = 100, margin_short = 100, commission_type = strategy.commission.percent, commission_value = 0, slippage = 0, calc_on_order_fills = true, calc_on_every_tick = false, process_orders_on_close = false)
-// Issues #200 / #201 / #202. Native broker-emulator demonstration; no live orders.
+// Issues #200 / #201 / #202 / #203. Native broker-emulator demonstration; no live orders.
 // Visual baseline: 6ec5ac9. Zero costs are illustrative, not performance evidence.
 
 //------------------------------------------------------------------------------
@@ -34,6 +34,8 @@ bool showTradeLabels = input.bool(true, "顯示粗體進出場與 SL／TP 價格
 int visibleTrades = input.int(10, "保留最近已出場交易圖形", minval=1, maxval=60, group="交易顯示")
 bool showFvgEvents = input.bool(false, "顯示首次進區／失效／關鍵 K 文字及 F+/F-", group="顯示")
 bool showFailureLog = input.bool(false, "顯示最近十筆失效明細表", group="顯示")
+// Append new inputs to preserve existing instance input IDs.
+bool requireOverlapTouch = input.bool(true, "需先觸碰重疊區才開始觀察", group="觀察", tooltip="開啟：首次碰到重疊區才起算觀察。關閉：從重疊區可判定後的第一根已收盤 15m K 起算；仍受觀察期限及收盤失效限制。切換會重算歷史，較早的關鍵 K 可能先消耗來源。")
 
 float displacementThreshold = displacementChoice == "30%" ? 0.30 : displacementChoice == "50%" ? 0.50 : 0.70
 float wickThreshold = wickChoice == "10%" ? 0.10 : wickChoice == "20%" ? 0.20 : 0.30
@@ -60,6 +62,7 @@ color keyColor = color.new(color.yellow, 62)
 //------------------------------------------------------------------------------
 // 儲存區
 // dir: 1 = 看多, -1 = 看空
+// ovTouchBar records observation start; OFF mode uses the first eligible confirmed bar.
 // overlap state: 0=等待進區, 1=觀察中, 2=失效, 3=觀察過期, 4=關鍵K已出現, 5=等待過期
 //------------------------------------------------------------------------------
 
@@ -140,7 +143,7 @@ f_overlap(float aBottom, float aTop, float bBottom, float bTop) =>
 f_precedes(int direction, float midA, int idA, float midB, int idB) =>
     (direction == 1 ? midA < midB : midA > midB) or (midA == midB and idA < idB)
 
-f_step(int state, int touchedAt, int direction, float bottom, float top, float htfWidth, int n, int window, bool eligible, bool confirmed, float o, float h, float l, float c, float displacement, float wickLimit) =>
+f_step(int state, int touchedAt, int direction, float bottom, float top, float htfWidth, int n, int window, bool eligible, bool confirmed, float o, float h, float l, float c, float displacement, float wickLimit, bool requireTouch = true) =>
     int nextState = state
     int nextTouch = touchedAt
     float bodyRatio = htfWidth > 0 ? math.abs(c - o) / htfWidth : na
@@ -150,7 +153,7 @@ f_step(int state, int touchedAt, int direction, float bottom, float top, float h
         if invalid
             nextState := 2
         else
-            if state == 0 and eligible and l <= top and h >= bottom
+            if state == 0 and eligible and (not requireTouch or (l <= top and h >= bottom))
                 nextState := 1
                 nextTouch := n
             if nextState == 1
@@ -609,16 +612,17 @@ if runSignalEngine and samples > 0
                         [state, touched, displacementRatio, forwardWickRatio] = f_step(oldState, oldTouch, d,
                             array.get(ovBottom, i), array.get(ovTop, i), array.get(ovHtfWidth, i),
                             sampleIndex, observationBars, sampleIndex >= array.get(ovEligibleBar, i), sampleConfirmed,
-                            sampleOpen, sampleHigh, sampleLow, sampleClose, displacementThreshold, wickThreshold)
+                            sampleOpen, sampleHigh, sampleLow, sampleClose, displacementThreshold, wickThreshold, requireOverlapTouch)
                         int finalState = f_wait_end(state, sampleIndex, array.get(ovEligibleBar, i), observationBars, sampleConfirmed)
                         state := finalState
                         array.set(ovState, i, state)
                         array.set(ovTouchBar, i, touched)
-                        bool firstTouch = na(oldTouch) and not na(touched)
+                        bool observationStarted = na(oldTouch) and not na(touched)
                         string eventText = ""
-                        if firstTouch
-                            touchEvents += 1
-                            eventText := "首次進區"
+                        if observationStarted
+                            if requireOverlapTouch
+                                touchEvents += 1
+                            eventText := requireOverlapTouch ? "首次進區" : "開始觀察（免觸碰）"
                         if state != oldState and state >= 2
                             ranksDirty := true
                             if not na(b)
@@ -674,7 +678,7 @@ if runSignalEngine and samples > 0
                             array.set(ovRank, i, f_rank(i))
                         if is15m and (barstate.islast or barstate.islastconfirmedhistory)
                             box b = array.get(ovBoxes, i)
-                            string progress = state == 0 ? "等待 " + str.tostring(math.max(0, sampleIndex - array.get(ovEligibleBar, i) + 1)) + "/" + str.tostring(observationBars) : "觀察 " + str.tostring(sampleIndex - array.get(ovTouchBar, i) + 1) + "/" + str.tostring(observationBars)
+                            string progress = state == 0 ? "等待 " + str.tostring(math.max(0, sampleIndex - array.get(ovEligibleBar, i) + 1)) + "/" + str.tostring(observationBars) : (requireOverlapTouch ? "觀察 " : "免觸碰觀察 ") + str.tostring(sampleIndex - array.get(ovTouchBar, i) + 1) + "/" + str.tostring(observationBars)
                             if not na(b)
                                 box.set_text(b, f_prefix(i) + "\n重度流動性｜" + progress)
                                 box.set_bgcolor(b, state == 1 ? color.new(color.blue, 87) : array.get(ovDir, i) == 1 ? overlapBullColor : overlapBearColor)
