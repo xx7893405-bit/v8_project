@@ -14,7 +14,7 @@ def extract(text, name):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--mode", choices=["contract", "timing", "observation"], default="contract")
+    parser.add_argument("--mode", choices=["contract", "timing", "observation", "same-close"], default="contract")
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     source = root / "tradingview/fvg_confluence_strategy_1a.pine"
@@ -29,9 +29,14 @@ def main():
         fixture = ('//@version=6\nindicator("FVG Observation Tests", overlay=true)\n'
                    + extract(text, "CONTRACT FUNCTIONS") + "\n"
                    + Path(__file__).with_name("fvg_observation_contract_cases.pine").read_text())
+    if args.mode == "same-close":
+        fixture = ('//@version=6\nindicator("FVG Same Close Tests", overlay=true)\n'
+                   + extract(text, "HTF RELEASE FUNCTIONS") + "\n"
+                   + extract(text, "CONTRACT FUNCTIONS") + "\n"
+                   + Path(__file__).with_name("fvg_same_close_contract_cases.pine").read_text())
     args.output.write_text(fixture)
     print(json.dumps({"fixture": str(args.output), "sha256": hashlib.sha256(fixture.encode()).hexdigest(),
-                      "assertions": fixture.count("passed += f_assert") + fixture.count("obsPassed +="), "execution": "not run; use TradingView"}))
+                      "assertions": fixture.count("passed += f_assert") + fixture.count("obsPassed +=") + fixture.count("releasePassed +="), "execution": "not run; use TradingView"}))
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 //@version=6
 strategy("V8 FVG 共振 1.0A｜多空獨立", overlay = true, max_boxes_count = 500, max_labels_count = 500, max_lines_count = 300, pyramiding = 0, initial_capital = 100000, default_qty_type = strategy.fixed, default_qty_value = 0.001, margin_long = 100, margin_short = 100, commission_type = strategy.commission.percent, commission_value = 0, slippage = 0, calc_on_order_fills = true, calc_on_every_tick = false, process_orders_on_close = false)
-// Issues #200 / #201 / #202 / #203. Native broker-emulator demonstration; no live orders.
+// Issues #200 / #201 / #202 / #203 / #204. Native broker-emulator demonstration; no live orders.
 // Visual baseline: 6ec5ac9. Zero costs are illustrative, not performance evidence.
 
 //------------------------------------------------------------------------------
@@ -142,6 +142,18 @@ varip float activeTarget = na
 varip int activeDirection = 0
 var array<line> tradeLines = array.new<line>()
 var array<label> tradeLabels = array.new<label>()
+
+// BEGIN HTF RELEASE FUNCTIONS
+// 0 = none, 1 = matching current close, 2 = previous confirmed fallback.
+f_htf_release(int currentClose, int previousClose, int sampleClose, bool confirmed, bool previousSlot, int lastReleased) =>
+    bool currentFresh = not na(currentClose) and (na(lastReleased) or currentClose > lastReleased)
+    bool previousFresh = not na(previousClose) and (na(lastReleased) or previousClose > lastReleased)
+    bool currentReady = confirmed and currentFresh and sampleClose == currentClose
+    currentReady ? 1 : previousSlot and previousFresh and previousClose <= sampleClose ? 2 : 0
+
+f_new_ltf_eligible(int n, int sourceClose, int sampleClose, bool releasedAtClose) =>
+    n + (releasedAtClose and sourceClose == sampleClose ? 0 : 1)
+// END HTF RELEASE FUNCTIONS
 
 // BEGIN CONTRACT FUNCTIONS
 f_gap(float hi, float lo, float oldHi, float oldLo) =>
@@ -314,30 +326,25 @@ if is15m and runSignalEngine and entryPending and bar_index > pendingBar
         label.new(time, close, "未成交：檢查模擬資金／數量", xloc=xloc.bar_time, style=label.style_label_left, color=color.orange, textcolor=color.black, size=eventTextSize, text_formatting=text.format_bold)
 
 
-// 取得「上一根已確認 1H K」的資料。
-// 所有 expression 都 offset 1 根，搭配 lookahead_on，避免 HTF repaint / future leak。
-// FVG：上一根 1H 為第 3 根，所以比較 low[1] vs high[3]。
+// The previous confirmed packet is the conservative fallback for missing closing
+// intrabars. The current packet MUST NOT be consumed until its matching confirmed
+// 15m close; lookahead_off alone is insufficient on realtime intrabars.
+// Drawing origin remains the third 1H candle OPEN; identity is its CLOSE.
 //------------------------------------------------------------------------------
-
-// The third candle open anchors drawings retrospectively ONLY after confirmation.
-[htfOpenedTime, htfClosedTime, htfHigh, htfLow, htfOldHigh, htfOldLow] = request.security(
+[prevHtfOpenedTime, prevHtfClosedTime, prevHtfHigh, prevHtfLow, prevHtfOldHigh, prevHtfOldLow] = request.security(
     syminfo.tickerid, HTF,
     [time[1], time_close[1], high[1], low[1], high[3], low[3]],
-    lookahead = barmerge.lookahead_on
-)
-[htfDirection, htfBottomNow, htfTopNow] = f_gap(htfHigh, htfLow, htfOldHigh, htfOldLow)
-bool htfBull = htfDirection == 1
-bool htfBear = htfDirection == -1
-float htfBullBottom = htfBottomNow
-float htfBullTop = htfTopNow
-float htfBearBottom = htfBottomNow
-float htfBearTop = htfTopNow
-
-// Evaluate on EVERY update of the first 15m bar after an HTF close.
-// Rollback then recreates the objects/state, and the closing update commits them.
-// barstate.isnew would run only on the opening tick and lose these var changes.
-int htfTimeChange = ta.change(htfClosedTime)
-bool newConfirmedHtf = not na(htfClosedTime) and not na(htfTimeChange) and htfTimeChange != 0
+    lookahead = barmerge.lookahead_on)
+[nowHtfOpenedTime, nowHtfClosedTime, nowHtfHigh, nowHtfLow, nowHtfOldHigh, nowHtfOldLow] = request.security(
+    syminfo.tickerid, HTF,
+    [time, time_close, high, low, high[2], low[2]],
+    lookahead = barmerge.lookahead_off)
+int htfTimeChange = ta.change(prevHtfClosedTime)
+bool newConfirmedHtf = not na(prevHtfClosedTime) and not na(htfTimeChange) and htfTimeChange != 0
+var int lastReleasedHtf = na
+float releasedHtfBottom = na
+float releasedHtfTop = na
+int releasedHtfDirection = 0
 
 //------------------------------------------------------------------------------
 // 工具：清除最舊物件，避免圖表物件超限。
@@ -396,8 +403,25 @@ if runSignalEngine and samples > 0
         int sampleIndex = closed15mCount
         if is15m or hourSeed or sampleConfirmed
             ranksDirty := false
-            if newConfirmedHtf and (is15m or hourSeed)
-                if htfBull
+            int releasePacket = f_htf_release(nowHtfClosedTime, prevHtfClosedTime, sampleCloseTime, sampleConfirmed, newConfirmedHtf and (is15m or hourSeed), lastReleasedHtf)
+            bool releasedAtClose = releasePacket == 1
+            if releasePacket != 0
+                int htfOpenedTime = releasedAtClose ? nowHtfOpenedTime : prevHtfOpenedTime
+                int htfClosedTime = releasedAtClose ? nowHtfClosedTime : prevHtfClosedTime
+                float htfHigh = releasedAtClose ? nowHtfHigh : prevHtfHigh
+                float htfLow = releasedAtClose ? nowHtfLow : prevHtfLow
+                float htfOldHigh = releasedAtClose ? nowHtfOldHigh : prevHtfOldHigh
+                float htfOldLow = releasedAtClose ? nowHtfOldLow : prevHtfOldLow
+                [htfDirection, htfBottomNow, htfTopNow] = f_gap(htfHigh, htfLow, htfOldHigh, htfOldLow)
+                lastReleasedHtf := htfClosedTime
+                releasedHtfDirection := htfDirection
+                releasedHtfBottom := htfBottomNow
+                releasedHtfTop := htfTopNow
+                float htfBullBottom = htfBottomNow
+                float htfBullTop = htfTopNow
+                float htfBearBottom = htfBottomNow
+                float htfBearTop = htfTopNow
+                if htfDirection == 1
                     box b = showBullFvg ? box.new(left = htfOpenedTime, xloc = xloc.bar_time, top = htfBullTop, right = sampleCloseTime, bottom = htfBullBottom, extend = extend.right, bgcolor = htfBullColor, border_color = color.new(color.teal, 25), text = "1H 看漲 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top) : na
                     array.push(htfTop, htfBullTop)
                     array.push(htfBottom, htfBullBottom)
@@ -438,7 +462,7 @@ if runSignalEngine and samples > 0
                                     ranksDirty := true
                                     f_trim_overlaps()
 
-                if htfBear
+                if htfDirection == -1
                     box b = showBearFvg ? box.new(left = htfOpenedTime, xloc = xloc.bar_time, top = htfBearTop, right = sampleCloseTime, bottom = htfBearBottom, extend = extend.right, bgcolor = htfBearColor, border_color = color.new(color.red, 25), text = "1H 看跌 FVG", text_color = chart.fg_color, text_size = zoneTextSize, text_halign = text.align_left, text_valign = text.align_top) : na
                     array.push(htfTop, htfBearTop)
                     array.push(htfBottom, htfBearBottom)
@@ -525,7 +549,7 @@ if runSignalEngine and samples > 0
                                     array.push(ovBoxes, ob)
                                     array.push(ovId, nextOverlapId)
                                     array.push(ovRank, 1)
-                                    array.push(ovEligibleBar, sampleIndex + 1)
+                                    array.push(ovEligibleBar, f_new_ltf_eligible(sampleIndex, array.get(htfSourceId, hi), sampleCloseTime, releasedAtClose))
                                     array.push(ovHtfId, array.get(htfSourceId, hi))
                                     array.push(ovHtfOpenedAt, array.get(htfOpenedAt, hi))
                                     array.push(ovHtfTop, array.get(htfTop, hi))
@@ -569,7 +593,7 @@ if runSignalEngine and samples > 0
                                     array.push(ovBoxes, ob)
                                     array.push(ovId, nextOverlapId)
                                     array.push(ovRank, 1)
-                                    array.push(ovEligibleBar, sampleIndex + 1)
+                                    array.push(ovEligibleBar, f_new_ltf_eligible(sampleIndex, array.get(htfSourceId, hi), sampleCloseTime, releasedAtClose))
                                     array.push(ovHtfId, array.get(htfSourceId, hi))
                                     array.push(ovHtfOpenedAt, array.get(htfOpenedAt, hi))
                                     array.push(ovHtfTop, array.get(htfTop, hi))
@@ -861,8 +885,8 @@ plotshape(is15m and showBearFvg and bearKeyBar, title = "空方關鍵 K 箭頭",
 barcolor(is15m and showFvgOverlay ? (showBullFvg and bullKeyBar ? color.rgb(33, 150, 243) : showBearFvg and bearKeyBar ? color.rgb(255, 152, 0) : na) : na, title = "關鍵 K 棒色", offset = 0)
 
 // Reconciliation fields: visible in Data Window; they do not affect price scaling.
-plot(is15m ? (newConfirmedHtf and f_display_side(htfDirection) ? htfBottomNow : na) : na, "1H 新確認 FVG 下界", display=display.data_window)
-plot(is15m ? (newConfirmedHtf and f_display_side(htfDirection) ? htfTopNow : na) : na, "1H 新確認 FVG 上界", display=display.data_window)
+plot(is15m ? (releasedHtfDirection != 0 and f_display_side(releasedHtfDirection) ? releasedHtfBottom : na) : na, "1H 新確認 FVG 下界", display=display.data_window)
+plot(is15m ? (releasedHtfDirection != 0 and f_display_side(releasedHtfDirection) ? releasedHtfTop : na) : na, "1H 新確認 FVG 上界", display=display.data_window)
 plot(is15m ? (((f_display_side(1) and bullFormation) or (f_display_side(-1) and bearFormation)) ? formedBottom : na) : na, "15m 新 FVG 下界", display=display.data_window)
 plot(is15m ? (((f_display_side(1) and bullFormation) or (f_display_side(-1) and bearFormation)) ? formedTop : na) : na, "15m 新 FVG 上界", display=display.data_window)
 plot(is15m ? (touchEvents) : na, "首次進區數", display=display.data_window)

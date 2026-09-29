@@ -1,0 +1,33 @@
+// Native Pine regression cases for issue #204. Append to strategy for chart execution.
+f_release_expect(bool ok, string name) =>
+    if not ok
+        runtime.error("SAME CLOSE FAIL: " + name)
+    1
+var int releasePassed = 0
+if barstate.isfirst
+    // Minute stamps: 14:00=840, 14:45=885, 15:00=900.
+    releasePassed += f_release_expect(f_htf_release(900, 840, 900, true, false, 840) == 1, "last 15m is available at 1H close")
+    releasePassed += f_release_expect(f_htf_release(900, 840, 855, true, false, 840) == 0, "14:00 candle cannot use future 1H")
+    releasePassed += f_release_expect(f_htf_release(900, 840, 885, true, false, 840) == 0, "penultimate candle cannot use future 1H")
+    releasePassed += f_release_expect(f_htf_release(900, 840, 900, false, false, 840) == 0, "unconfirmed or fill callback cannot release")
+    releasePassed += f_release_expect(f_htf_release(900, 840, 900, true, false, 900) == 0, "same close duplicate blocked")
+    releasePassed += f_release_expect(f_htf_release(960, 900, 915, true, true, 900) == 0, "next hour fallback deduplicated")
+    releasePassed += f_release_expect(f_htf_release(960, 900, 915, true, true, 840) == 2, "missing closing candle uses conservative fallback")
+    releasePassed += f_release_expect(f_htf_release(960, 900, 885, true, true, 840) == 0, "future fallback rejected")
+    releasePassed += f_release_expect(f_htf_release(900, 840, 900, false, true, 780) == 2, "1H seed only releases prior hour")
+    releasePassed += f_release_expect(f_htf_release(900, 840, 900, true, false, int(na)) == 1, "first confirmed close")
+    releasePassed += f_release_expect(f_new_ltf_eligible(12, 900, 900, true) == 12, "new same-close overlap eligible now")
+    releasePassed += f_release_expect(f_new_ltf_eligible(12, 840, 900, true) == 13, "older source remains next-bar")
+    releasePassed += f_release_expect(f_new_ltf_eligible(12, 900, 900, false) == 13, "fallback does not backdate eligibility")
+    int eligible = f_new_ltf_eligible(12, 900, 900, true)
+    [longState, lt, lb, lw] = f_step(0, int(na), 1, 100, 110, 20, 12, 96, 12 >= eligible, true, 110, 122, 109, 121, 0.5, 0.2, false)
+    releasePassed += f_release_expect(longState == 4, "same-close long key")
+    [shortState, st, sb, sw] = f_step(0, int(na), -1, 100, 110, 20, 12, 96, 12 >= eligible, true, 100, 101, 88, 89, 0.5, 0.2, false)
+    releasePassed += f_release_expect(shortState == 4, "same-close short key")
+    [touchState, tt, tb, tw] = f_step(0, int(na), 1, 100, 110, 20, 12, 96, true, true, 112, 124, 111, 123, 0.5, 0.2, true)
+    releasePassed += f_release_expect(touchState == 0, "touch ON still gates")
+    [invalidState, it, ib, iw] = f_step(0, int(na), 1, 100, 110, 20, 12, 96, true, true, 80, 100, 79, 99, 0.5, 0.2, false)
+    releasePassed += f_release_expect(invalidState == 2, "close invalidation wins over key")
+    [earlierState, et, eb, ew] = f_step(0, int(na), 1, 100, 110, 20, 11, 96, false, true, 100, 122, 99, 121, 0.5, 0.2, false)
+    releasePassed += f_release_expect(earlierState == 0, "never inspect earlier candle retrospectively")
+plot(releasePassed, "Same-close assertions", display=display.status_line)

@@ -1,0 +1,32 @@
+// Append to production strategy only; native broker and MTF integration assertions.
+var int integrationCloses = 0
+float lastHourHigh = ta.highest(high, 4)
+float lastHourLow = ta.lowest(low, 4)
+if is15m and runSignalEngine and time_close == nowHtfClosedTime and time_close - time[3] == 60 * 60 * 1000
+    if math.abs(nowHtfHigh - lastHourHigh) > syminfo.mintick / 2 or math.abs(nowHtfLow - lastHourLow) > syminfo.mintick / 2
+        runtime.error("MTF closing packet differs from four closed 15m candles")
+    if time_close - time_close[8] == 2 * 60 * 60 * 1000 and (math.abs(nowHtfOldHigh - lastHourHigh[8]) > syminfo.mintick / 2 or math.abs(nowHtfOldLow - lastHourLow[8]) > syminfo.mintick / 2)
+        runtime.error("MTF first FVG candle differs from 15m reconstruction")
+    integrationCloses += 1
+if is15m and fillExecution and strategy.position_size != 0
+    if strategy.opentrades.entry_bar_index(0) != pendingBar + 1 or math.abs(strategy.position_avg_price - open) > syminfo.mintick / 2
+        runtime.error("Entry is not next-bar open")
+int auditedEntries = 0
+if is15m and barstate.islast
+    array<string> auditIds = array.new_string()
+    if strategy.closedtrades > 0
+        for i = 0 to strategy.closedtrades - 1
+            string id = strategy.closedtrades.entry_id(i)
+            int sourceClose = int(str.tonumber(str.substring(id, 4)))
+            if strategy.closedtrades.entry_time(i) < sourceClose or array.includes(auditIds, id)
+                runtime.error("Backdated or duplicate FVG entry")
+            array.push(auditIds, id)
+            auditedEntries += 1
+    if strategy.opentrades > 0
+        string id = strategy.opentrades.entry_id(0)
+        int sourceClose = int(str.tonumber(str.substring(id, 4)))
+        if strategy.opentrades.entry_time(0) < sourceClose or array.includes(auditIds, id)
+            runtime.error("Backdated or duplicate open FVG entry")
+        auditedEntries += 1
+plot(integrationCloses, "MTF reconstructed closes", display=display.status_line)
+plot(auditedEntries, "Native audited entries", display=display.status_line)

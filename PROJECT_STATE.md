@@ -1,5 +1,9 @@
 # Project State
 
+## 此 checkout 的 FVG 同收盤里程碑（2026-09-29）
+
+Issue #204；`codex/fvg-confluence-same-close`，baseline `61ce4be`。1H 確認當下判定同收盤最後一根 15m，下一根開盤成交；不回看早期 K。18 項原生斷言、499 個小時價格重建、多方 21／空方 11 筆原生成交時序通過。TV 私有 v25，全碼指紋與本地一致。有限對照與限制見 `docs/FVG_CONFLUENCE_SAME_CLOSE_1A.md`；未執行正式 V8 回測、push 或實盤。
+
 ## 此 checkout 的 FVG 觸碰開關里程碑（2026-09-29）
 
 Issue #203；`codex/fvg-confluence-touch-option` 基準 `20a7a42`，新增預設開啟的首次觸碰要求。關閉自 eligible 確認棒開始 96 根觀察；其他時序與交易契約保留。原生 22 項斷言與 640 組 ON 基準對照通過，TV v4 兩份實例已切換驗證並還原 ON。證據與限制見 `docs/FVG_CONFLUENCE_TOUCH_OPTION_1A.md`；未跑正式 V8 回測或 push。

@@ -4,6 +4,7 @@
 
 | ID | Status | Owner / worktree | Depends on | Ownership | Acceptance |
 |---|---|---|---|---|---|
+| FVG-SAME-CLOSE-204 | done | Codex / `codex/fvg-confluence-same-close` | Issue #204; user approved same-close only | Pine release/eligibility + native cases; baseline 61ce4be | This row commit; native 18 assertions, 499 reconstructed hours, 21 long / 11 short entry checks; TV v25; docs/FVG_CONFLUENCE_SAME_CLOSE_1A.md |
 | FVG-TOUCH-203 | done | Codex / `codex/fvg-confluence-touch-option` | Issue #203; user request 2026-09-29 | Optional first overlap touch; preserve 20a7a42 | This row commit; native 22 assertions + 640 ON parity cases, 7 historical short rows, two TV v4 instances toggled/restored ON; docs/FVG_CONFLUENCE_TOUCH_OPTION_1A.md |
 | FVG-DUAL-202 | done | Codex / `codex/fvg-confluence-tv-dual` | Issue #202; user confirmed 2026-09-29 | Independent long/short native instances; preserve c0d7e2b | This row commit; 23 Pine assertions, same-mode visible 7-trade parity, overlapping long/short and 1H UI; docs/FVG_CONFLUENCE_DUAL_1A.md |
 | FVG-SIM-201 | done | Codex / `codex/fvg-confluence-tv-sim` | Issue #200, #201; approved 2026-09-29 | New FVG strategy, native Pine tests, task docs; preserve visual baseline 6ec5ac9 | This row's commit; native compile + 14 contracts + 2 timing trades, BTCUSDT SL/TP + 1H UI verified; see docs/FVG_CONFLUENCE_SIM_1A.md; no formal V8 backtest |
